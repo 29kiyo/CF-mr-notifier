@@ -50,3 +50,6 @@ create table if not exists public.notifier_seen (
 alter table public.notifier_projects enable row level security;
 alter table public.notifier_sources enable row level security;
 alter table public.notifier_seen enable row level security;
+
+-- Data API(service_role)から読み書きできるようにする。anon / authenticated には与えない。
+grant select, insert, update, delete on public.notifier_projects, public.notifier_sources, public.notifier_seen to service_role;
