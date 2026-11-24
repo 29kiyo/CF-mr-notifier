@@ -1,17 +1,10 @@
-/* 角の丸さをボタン・入力欄・プルダウンでそろえる */
-:root { --radius: 12px; }
-.btn { border-radius: var(--radius); }
-input, select { border-radius: var(--radius); }
-.chip, .rchip, .ver { border-radius: 999px; }
-.rchip { padding-right: .3rem; }
-.card { border-radius: 14px; }
-.modal { border-radius: 16px; }
-.srcpill, .src, .result, .switchrow.compact, .verlist, .alert { border-radius: var(--radius); }
+/* 丸くするのはプルダウンだけ。ボタン・入力欄などは元の形(styles.css)のまま */
+:root { --radius-select: 12px; }
 
 /* ---- 角の丸いプルダウン ---- */
 .select { position: relative; width: 100%; }
 .select.short { width: auto; min-width: 9rem; max-width: 14rem; }
-.select-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: .6rem; background: var(--input); color: var(--text); border: 1px solid transparent; border-radius: var(--radius); padding: .6rem .8rem; font: inherit; text-align: left; }
+.select-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: .6rem; background: var(--input); color: var(--text); border: 1px solid transparent; border-radius: var(--radius-select); padding: .6rem .8rem; font: inherit; text-align: left; }
 .select-btn:hover:not(:disabled) { background: #232428; }
 .select-btn:focus-visible, .select-btn[aria-expanded='true'] { border-color: var(--primary); outline: none; }
 .select-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -35,15 +28,15 @@ input, select { border-radius: var(--radius); }
 
 /* ---- GitHub通知元の設定 ---- */
 .srcwrap { display: flex; flex-direction: column; gap: .4rem; }
-.ghbox { margin-left: .6rem; padding: .9rem 1rem; border-left: 3px solid rgba(139, 148, 158, .5); background: rgba(0, 0, 0, .15); border-radius: 0 var(--radius) var(--radius) 0; display: flex; flex-direction: column; gap: .7rem; }
+.ghbox { margin-left: .6rem; padding: .9rem 1rem; border-left: 3px solid rgba(139, 148, 158, .5); background: rgba(0, 0, 0, .15); border-radius: 0 8px 8px 0; display: flex; flex-direction: column; gap: .7rem; }
 .evgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .4rem; }
-.evopt { display: flex; align-items: center; gap: .5rem; background: rgba(0, 0, 0, .2); border: 1px solid transparent; border-radius: var(--radius); padding: .45rem .7rem; font-size: .86rem; cursor: pointer; }
+.evopt { display: flex; align-items: center; gap: .5rem; background: rgba(0, 0, 0, .2); border: 1px solid transparent; border-radius: 8px; padding: .45rem .7rem; font-size: .86rem; cursor: pointer; }
 .evopt.on { border-color: var(--primary); background: rgba(88, 101, 242, .18); }
 .evopt input { width: auto; accent-color: var(--primary); }
 .webhook { border-top: 1px dashed var(--border); padding-top: .8rem; display: flex; flex-direction: column; gap: .5rem; }
 .copyrow { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .clabel { min-width: 6.5rem; font-size: .78rem; font-weight: 700; color: var(--muted); }
-.copyrow code { background: var(--input); border-radius: 8px; padding: .3rem .6rem; font-size: .85rem; }
+.copyrow code { background: var(--input); border-radius: 6px; padding: .3rem .6rem; font-size: .85rem; }
 .copyrow input { font-size: .8rem; }
 .embed.gh { padding-right: .8rem; }
 .eauthor { display: flex; align-items: center; gap: .4rem; font-size: .8rem; font-weight: 700; margin-bottom: .25rem; }
