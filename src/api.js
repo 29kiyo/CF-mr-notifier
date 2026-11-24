@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import * as db from './db.js';
 import { platforms, getOptions, PROJECT_TYPES } from './platforms.js';
 import { guildMeta, searchMembers, sendToChannel, explainSendError, botInGuild, inviteUrl } from './bot.js';
@@ -39,12 +39,12 @@ function cleanInput(b, meta, partial = false) {
 
   if (has('name')) {
     const name = String(b.name ?? '').trim().slice(0, 80);
-    if (!name) throw bad('繝励Ο繧ｸ繧ｧ繧ｯ繝亥錐繧貞・蜉帙＠縺ｦ縺上□縺輔＞');
+    if (!name) throw bad('プロジェクト名を入力してください');
     out.name = name;
   }
   if (has('channel_id')) {
-    if (!SNOW.test(String(b.channel_id || ''))) throw bad('騾夂衍繝√Ε繝ｳ繝阪Ν繧帝∈繧薙〒縺上□縺輔＞');
-    if (!meta.channels.some((c) => c.id === b.channel_id)) throw bad('縺昴・繝√Ε繝ｳ繝阪Ν縺ｯ隕九▽縺九ｊ縺ｾ縺帙ｓ');
+    if (!SNOW.test(String(b.channel_id || ''))) throw bad('通知チャンネルを選んでください');
+    if (!meta.channels.some((c) => c.id === b.channel_id)) throw bad('そのチャンネルは見つかりません');
     out.channel_id = b.channel_id;
   }
   if (has('color')) out.color = parseColor(b.color, out.name || 'project');
@@ -78,21 +78,21 @@ function cleanInput(b, meta, partial = false) {
 }
 
 async function resolveSource(s) {
-  if (!s || !platforms[s.platform]) throw bad('荳肴・縺ｪ繝励Λ繝・ヨ繝輔か繝ｼ繝縺ｧ縺・);
+  if (!s || !platforms[s.platform]) throw bad('不明なプラットフォームです');
   const id = String(s.external_id || '').trim();
-  if (!id || id.length > 200) throw bad('繝励Ο繧ｸ繧ｧ繧ｯ繝・D縺梧ｭ｣縺励￥縺ゅｊ縺ｾ縺帙ｓ');
+  if (!id || id.length > 200) throw bad('プロジェクトIDが正しくありません');
   try {
     const info = await platforms[s.platform].fetchInfo(id);
     return { platform: s.platform, external_id: info.id, display_name: info.name, icon_url: info.iconUrl, project_type: info.projectType };
   } catch (e) {
     if (e.expose) throw e;
-    throw bad(`${s.platform} 縺ｧ繝励Ο繧ｸ繧ｧ繧ｯ繝医′隕九▽縺九ｊ縺ｾ縺帙ｓ(${id})`);
+    throw bad(`${s.platform} でプロジェクトが見つかりません(${id})`);
   }
 }
 
 async function ownedProject(gid, pid) {
   const p = await db.getProject(pid);
-  if (!p || p.guild_id !== gid) throw bad('繝励Ο繧ｸ繧ｧ繧ｯ繝医′隕九▽縺九ｊ縺ｾ縺帙ｓ', 404);
+  if (!p || p.guild_id !== gid) throw bad('プロジェクトが見つかりません', 404);
   return p;
 }
 
@@ -146,7 +146,7 @@ apiRouter.get('/me', (req, res) => {
   res.json({ user: { id: req.user.sub, name: req.user.name, avatarUrl: req.user.avatar }, guilds });
 });
 
-// 邨槭ｊ霎ｼ縺ｿ繝ｻ讀懃ｴ｢逕ｨ縺ｮ蛟呵｣・蟇ｾ蠢懊ヰ繝ｼ繧ｸ繝ｧ繝ｳ / 繝ｭ繝ｼ繝繝ｼ / 遞ｮ鬘・
+// 絞り込み・検索用の候補(対応バージョン / ローダー / 種類)
 apiRouter.get(
   '/options',
   wrap(async (req, res) => {
@@ -160,12 +160,12 @@ apiRouter.get(
     const platform = String(req.query.platform || '');
     const type = PROJECT_TYPES.includes(String(req.query.type)) ? String(req.query.type) : 'mod';
     const q = String(req.query.q || '').trim().slice(0, 100);
-    if (!platforms[platform]) throw bad('荳肴・縺ｪ繝励Λ繝・ヨ繝輔か繝ｼ繝縺ｧ縺・);
+    if (!platforms[platform]) throw bad('不明なプラットフォームです');
     try {
       res.json({ results: await platforms[platform].search(q, type) });
     } catch (e) {
       if (e.expose) throw e;
-      throw bad('讀懃ｴ｢縺ｫ螟ｱ謨励＠縺ｾ縺励◆縲ょｰ代＠蠕・▲縺ｦ縺九ｉ繧ゅ≧荳蠎ｦ縺願ｩｦ縺励￥縺縺輔＞', 502);
+      throw bad('検索に失敗しました。少し待ってからもう一度お試しください', 502);
     }
   }),
 );
@@ -184,7 +184,7 @@ guild.get(
     try {
       res.json({ members: await searchMembers(req.params.gid, String(req.query.q || '').slice(0, 50)) });
     } catch {
-      throw bad('繝｡繝ｳ繝舌・讀懃ｴ｢縺ｫ螟ｱ謨励＠縺ｾ縺励◆(Developer Portal縺ｧ縲郡erver Members Intent縲阪ｒON縺ｫ縺励※縺上□縺輔＞)縲ゅΘ繝ｼ繧ｶ繝ｼID縺ｮ逶ｴ謗･蜈･蜉帙・菴ｿ縺医∪縺・, 502);
+      throw bad('メンバー検索に失敗しました(Developer Portalで「Server Members Intent」をONにしてください)。ユーザーIDの直接入力は使えます', 502);
     }
   }),
 );
@@ -198,12 +198,12 @@ guild.post(
   '/projects',
   wrap(async (req, res) => {
     const gid = req.params.gid;
-    if ((await db.countProjects(gid)) >= MAX_PROJECTS_PER_GUILD) throw bad(`1繧ｵ繝ｼ繝舌・縺ｫ縺､縺・{MAX_PROJECTS_PER_GUILD}莉ｶ縺ｾ縺ｧ縺ｧ縺兪);
+    if ((await db.countProjects(gid)) >= MAX_PROJECTS_PER_GUILD) throw bad(`1サーバーにつき${MAX_PROJECTS_PER_GUILD}件までです`);
     const meta = await guildMeta(gid);
     const input = cleanInput(req.body || {}, meta);
     const list = Array.isArray(req.body?.sources) ? req.body.sources : [];
-    if (!list.length) throw bad('騾夂衍蜈・Modrinth / CurseForge / GitHub)繧・縺､莉･荳企∈繧薙〒縺上□縺輔＞');
-    if (list.length > MAX_SOURCES) throw bad(`騾夂衍蜈・・${MAX_SOURCES}莉ｶ縺ｾ縺ｧ縺ｧ縺兪);
+    if (!list.length) throw bad('通知元(Modrinth / CurseForge / GitHub)を1つ以上選んでください');
+    if (list.length > MAX_SOURCES) throw bad(`通知元は${MAX_SOURCES}件までです`);
     const resolved = [];
     for (const s of list) {
       const r = await resolveSource(s);
@@ -228,8 +228,8 @@ guild.put(
 
     if (Array.isArray(req.body?.sources)) {
       const list = req.body.sources;
-      if (!list.length) throw bad('騾夂衍蜈・ｒ1縺､莉･荳企∈繧薙〒縺上□縺輔＞');
-      if (list.length > MAX_SOURCES) throw bad(`騾夂衍蜈・・${MAX_SOURCES}莉ｶ縺ｾ縺ｧ縺ｧ縺兪);
+      if (!list.length) throw bad('通知元を1つ以上選んでください');
+      if (list.length > MAX_SOURCES) throw bad(`通知元は${MAX_SOURCES}件までです`);
       const keep = new Set();
       for (const s of list) {
         const existing = p.sources.find((x) => x.platform === s.platform && x.external_id === String(s.external_id));
@@ -263,12 +263,12 @@ guild.delete(
   }),
 );
 
-// 繝・せ繝磯∽ｿ｡: 譖ｴ譁ｰ縺後↑縺上※繧ゅ∽ｻ翫・險ｭ螳壹〒譛譁ｰ繝舌・繧ｸ繝ｧ繝ｳ繧帝夂衍繝√Ε繝ｳ繝阪Ν縺ｫ騾√ｋ(繝｡繝ｳ繧ｷ繝ｧ繝ｳ縺ｪ縺・
+// テスト送信: 更新がなくても、今の設定で最新バージョンを通知チャンネルに送る(メンションなし)
 guild.post(
   '/projects/:pid/test',
   wrap(async (req, res) => {
     const p = await ownedProject(req.params.gid, req.params.pid);
-    // 菫晏ｭ伜燕縺ｮ險ｭ螳壹〒繧りｩｦ縺帙ｋ繧医≧縲√Μ繧ｯ繧ｨ繧ｹ繝医↓險ｭ螳壹′蜷ｫ縺ｾ繧後※縺・ｌ縺ｰ荳頑嶌縺阪＠縺ｦ菴ｿ縺・
+    // 保存前の設定でも試せるよう、リクエストに設定が含まれていれば上書きして使う
     const meta = await guildMeta(req.params.gid);
     const override = req.body && Object.keys(req.body).length ? cleanInput(req.body, meta, true) : {};
     const project = { ...p, ...override };
@@ -281,10 +281,10 @@ guild.post(
         rels.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
         if (rels[0]) newest.push(rels[0]);
       } catch (e) {
-        throw bad(`${s.platform} 縺九ｉ蜿門ｾ励〒縺阪∪縺帙ｓ縺ｧ縺励◆: ${e.message}`, 502);
+        throw bad(`${s.platform} から取得できませんでした: ${e.message}`, 502);
       }
     }
-    if (!newest.length) throw bad('蜿門ｾ励〒縺阪ｋ繝舌・繧ｸ繝ｧ繝ｳ縺後≠繧翫∪縺帙ｓ');
+    if (!newest.length) throw bad('取得できるバージョンがありません');
     const groups = project.merge_platforms ? [newest] : newest.map((r) => [r]);
     try {
       for (const g of groups) {
@@ -298,7 +298,7 @@ guild.post(
   }),
 );
 
-// 莉翫☆縺舌メ繧ｧ繝・け
+// 今すぐチェック
 guild.post(
   '/projects/:pid/check',
   wrap(async (req, res) => {
@@ -309,5 +309,5 @@ guild.post(
 
 apiRouter.use((err, req, res, next) => {
   if (!err.expose) console.error('[api]', req.method, req.path, err.message);
-  res.status(err.expose ? err.status || 400 : 500).json({ error: err.expose ? err.message : '繧ｵ繝ｼ繝舌・蜀・Κ繧ｨ繝ｩ繝ｼ縺檎匱逕溘＠縺ｾ縺励◆' });
+  res.status(err.expose ? err.status || 400 : 500).json({ error: err.expose ? err.message : 'サーバー内部エラーが発生しました' });
 });
