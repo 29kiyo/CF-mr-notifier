@@ -114,3 +114,26 @@ export async function resolveMembers(guildId, ids) {
   );
   return out;
 }
+// ダッシュボードを操作している人が、今もそのサーバーの管理権限を持っているか確認する(60秒キャッシュ)。
+// true=持っている / false=持っていない / null=確認できなかった
+const permCache = new Map();
+export async function canManageGuild(guildId, userId) {
+  const key = `${guildId}:${userId}`;
+  const hit = permCache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.ok;
+  const g = client.guilds.cache.get(guildId);
+  if (!g) return false;
+  let ok;
+  try {
+    if (g.ownerId === userId) ok = true;
+    else {
+      const m = await g.members.fetch(userId);
+      ok = m.permissions.has(PermissionFlagsBits.Administrator) || m.permissions.has(PermissionFlagsBits.ManageGuild);
+    }
+  } catch (e) {
+    if (e?.code === 10007 || e?.code === 10013) ok = false; // サーバーにいない
+    else return null;
+  }
+  permCache.set(key, { ok, exp: Date.now() + 60_000 });
+  return ok;
+}

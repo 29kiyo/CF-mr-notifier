@@ -2,10 +2,13 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { allowedOrigins, publicUrl } from './config.js';
-import { botInGuild } from './bot.js';
+import { botInGuild, canManageGuild } from './bot.js';
 
 const API = 'https://discord.com/api/v10';
 const SECRET = () => process.env.SESSION_SECRET;
+// ログインの保持期間。毎回ログインしなくて済むよう長めにしている。
+// (サーバー管理権限は、操作のたびにDiscordで最新の状態を確認しているので、期間が長くても安全)
+const SESSION_DAYS = 30;
 
 export const authRouter = express.Router();
 
@@ -84,7 +87,7 @@ authRouter.get('/callback', async (req, res) => {
         guilds: manageable,
       },
       SECRET(),
-      { expiresIn: '8h' },
+      { expiresIn: `${SESSION_DAYS}d` },
     );
     return back(`token=${token}`);
   } catch (e) {
@@ -105,9 +108,12 @@ export function requireAuth(req, res, next) {
   }
 }
 
-export function requireGuild(req, res, next) {
+export async function requireGuild(req, res, next) {
   const gid = req.params.gid;
   if (!req.user.guilds.some((g) => g.id === gid)) return res.status(403).json({ error: 'このサーバーを管理する権限がありません' });
   if (!botInGuild(gid)) return res.status(404).json({ error: 'ボットがこのサーバーに参加していません', code: 'bot_not_in_guild' });
+  // ログイン後に権限を失っていないか、Discordの最新の状態を確認する(確認できない場合はログイン時の情報を使う)
+  const live = await canManageGuild(gid, req.user.sub).catch(() => null);
+  if (live === false) return res.status(403).json({ error: 'このサーバーを管理する権限がなくなっています' });
   next();
 }
