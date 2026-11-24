@@ -92,3 +92,25 @@ export function explainSendError(e) {
       return e?.message || '送信に失敗しました';
   }
 }
+
+export async function resolveMembers(guildId, ids) {
+  const g = client.guilds.cache.get(guildId);
+  if (!g) return [];
+  const out = [];
+  await Promise.all(
+    ids.slice(0, 10).map(async (id) => {
+      try {
+        const m = await g.members.fetch(id);
+        out.push({ id: m.id, username: m.user.username, displayName: m.displayName, avatarUrl: m.displayAvatarURL({ size: 64 }), bot: m.user.bot });
+      } catch {
+        try {
+          const u = await client.users.fetch(id);
+          out.push({ id: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.displayAvatarURL({ size: 64 }), bot: u.bot });
+        } catch {
+          // skip users that cannot be fetched
+        }
+      }
+    }),
+  );
+  return out;
+}

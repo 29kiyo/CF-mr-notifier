@@ -151,15 +151,26 @@ export function buildMessage(project, group, { test = false } = {}) {
   }
   if (fields.length) embed.fields = fields;
 
-  const roles = project.mention_role_ids || [];
-  const users = project.mention_user_ids || [];
   if (test) {
     return { content: L.testNote, embeds: [embed], allowedMentions: { parse: [] } };
   }
-  const mentions = [...roles.map((id) => `<@&${id}>`), ...users.map((id) => `<@${id}>`)];
+  const m = mentionParts(project);
+  return { content: m.content, embeds: [embed], allowedMentions: m.allowedMentions };
+}
+
+export function mentionParts(project) {
+  const roles = project.mention_role_ids || [];
+  const users = project.mention_user_ids || [];
+  const ev = !!project.mention_everyone;
+  const here = !!project.mention_here;
+  const parts = [
+    ...(ev ? ['@everyone'] : []),
+    ...(here ? ['@here'] : []),
+    ...roles.map((id) => `<@&${id}>`),
+    ...users.map((id) => `<@${id}>`),
+  ];
   return {
-    content: mentions.join(' ') || undefined,
-    embeds: [embed],
-    allowedMentions: { parse: [], roles, users },
+    content: parts.join(' ') || undefined,
+    allowedMentions: { parse: ev || here ? ['everyone'] : [], roles, users },
   };
 }

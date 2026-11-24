@@ -53,3 +53,8 @@ alter table public.notifier_seen enable row level security;
 
 -- Data API(service_role)から読み書きできるようにする。anon / authenticated には与えない。
 grant select, insert, update, delete on public.notifier_projects, public.notifier_sources, public.notifier_seen to service_role;
+
+-- GitHub(Webhook)の設定と @everyone / @here 用の列
+alter table public.notifier_sources add column if not exists config jsonb not null default '{}'::jsonb;
+alter table public.notifier_projects add column if not exists mention_everyone boolean not null default false;
+alter table public.notifier_projects add column if not exists mention_here boolean not null default false;

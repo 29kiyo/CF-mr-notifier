@@ -5,6 +5,7 @@ import { Events } from 'discord.js';
 import { client } from './bot.js';
 import { authRouter } from './auth.js';
 import { apiRouter } from './api.js';
+import { webhookRouter } from './webhooks.js';
 import { runCycle } from './poller.js';
 import { allowedOrigins, pollMs } from './config.js';
 
@@ -17,6 +18,7 @@ app.get(['/', '/health'], (req, res) => {
 });
 
 app.use('/auth', authRouter);
+app.use('/webhooks', webhookRouter);
 app.use(
   '/api',
   cors({

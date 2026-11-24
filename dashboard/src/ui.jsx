@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 /* ---------- トースト ---------- */
 const toasts = [];
@@ -110,6 +110,16 @@ export function GuildIcon({ name, url, size = 48 }) {
   );
 }
 
+export function Avatar({ name, url, size = 28 }) {
+  const style = { width: size, height: size, fontSize: size * 0.42 };
+  if (url) return <img className="av" style={style} src={url} alt="" loading="lazy" />;
+  return (
+    <span className="av ph" style={style} aria-hidden>
+      {Array.from(name || '?')[0]}
+    </span>
+  );
+}
+
 export function PlatformBadge({ platform }) {
   const label = { modrinth: 'Modrinth', curseforge: 'CurseForge', github: 'GitHub' }[platform] || platform;
   return <span className={'pbadge ' + platform}>{label}</span>;
@@ -127,6 +137,123 @@ export function Modal({ title, onClose, children }) {
         <h2>{title}</h2>
         {children}
       </div>
+    </div>
+  );
+}
+
+export function CopyButton({ text, label = 'コピー' }) {
+  const [ok, setOk] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setOk(true);
+      setTimeout(() => setOk(false), 1500);
+    } catch {
+      toast('コピーできませんでした。手動で選択してコピーしてください', 'error');
+    }
+  }
+  return (
+    <button type="button" className="btn small" onClick={copy}>
+      {ok ? '✓ コピーしました' : label}
+    </button>
+  );
+}
+
+/* ---------- 角の丸いプルダウン(標準の選択ボックスの代わり) ---------- */
+// options: [{ value, label, disabled?, group? }]
+export function Select({ value, onChange, options, placeholder = '選んでください', ariaLabel, className = '', disabled }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const [up, setUp] = useState(false);
+  const root = useRef(null);
+  const pop = useRef(null);
+  const cur = options.find((o) => o.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const f = (e) => {
+      if (root.current && !root.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', f);
+    return () => document.removeEventListener('mousedown', f);
+  }, [open]);
+
+  useEffect(() => {
+    if (open && active >= 0) pop.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [open, active]);
+
+  function toggle() {
+    if (disabled) return;
+    if (!open) {
+      const r = root.current.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom;
+      setUp(below < 300 && r.top > below);
+      setActive(Math.max(0, options.findIndex((o) => o.value === value)));
+    }
+    setOpen((o) => !o);
+  }
+  function pick(i) {
+    const o = options[i];
+    if (!o || o.disabled) return;
+    onChange(o.value);
+    setOpen(false);
+    root.current?.querySelector('button')?.focus();
+  }
+  function move(dir) {
+    let i = active;
+    for (let n = 0; n < options.length; n++) {
+      i = (i + dir + options.length) % options.length;
+      if (!options[i].disabled) return setActive(i);
+    }
+  }
+  function onKey(e) {
+    if (!open) {
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) {
+        e.preventDefault();
+        toggle();
+      }
+      return;
+    }
+    if (e.key === 'Escape') setOpen(false);
+    else if (e.key === 'ArrowDown') (e.preventDefault(), move(1));
+    else if (e.key === 'ArrowUp') (e.preventDefault(), move(-1));
+    else if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), pick(active));
+    else if (e.key === 'Tab') setOpen(false);
+  }
+
+  return (
+    <div className={'select ' + className} ref={root}>
+      <button type="button" className="select-btn" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel} disabled={disabled} onClick={toggle} onKeyDown={onKey}>
+        <span className={'select-val' + (cur ? '' : ' ph')}>{cur ? cur.label : placeholder}</span>
+        <span className="chev" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <ul className={'select-pop' + (up ? ' up' : '')} role="listbox" ref={pop}>
+          {options.map((o, i) => (
+            <Fragment key={String(o.value)}>
+              {o.group && o.group !== options[i - 1]?.group && (
+                <li className="select-group" role="presentation">
+                  {o.group}
+                </li>
+              )}
+              <li
+                role="option"
+                aria-selected={o.value === value}
+                aria-disabled={o.disabled || undefined}
+                data-i={i}
+                className={'select-opt' + (o.value === value ? ' sel' : '') + (i === active ? ' act' : '') + (o.disabled ? ' dis' : '')}
+                onMouseEnter={() => !o.disabled && setActive(i)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(i)}
+              >
+                {o.label}
+              </li>
+            </Fragment>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

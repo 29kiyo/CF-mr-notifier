@@ -278,7 +278,14 @@ async function ghFetchInfo(id) {
     e.status = 400;
     throw e;
   }
-  return memo(`gh:${repo}`, 30 * 60 * 1000, async () => ghInfo(await ghGet(`/repos/${repo}`)));
+  return memo(`gh:${repo}`, 30 * 60 * 1000, async () => {
+    try {
+      return ghInfo(await ghGet(`/repos/${repo}`));
+    } catch (e) {
+      if (e.status !== 404 && e.status !== 403) throw e;
+      return { platform: 'github', id: repo, slug: repo, name: repo.split('/')[1], description: null, iconUrl: `https://github.com/${repo.split('/')[0]}.png`, downloads: null, projectType: 'github', url: `https://github.com/${repo}` };
+    }
+  });
 }
 
 function ghRelease(r, info) {

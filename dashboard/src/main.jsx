@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import { consumeAuthHash } from './lib.js';
 import './styles.css';
+import './styles-extra.css';
 
 consumeAuthHash();
 if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/');

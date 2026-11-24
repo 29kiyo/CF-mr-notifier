@@ -79,3 +79,7 @@ export async function markSeen(sourceId, versionIds) {
     must(await sb.from('notifier_seen').upsert(rows, { onConflict: 'source_id,version_id', ignoreDuplicates: true }));
   }
 }
+
+export async function getSourceWithProject(id) {
+  return must(await sb.from('notifier_sources').select('*, project:notifier_projects(*)').eq('id', id).maybeSingle());
+}

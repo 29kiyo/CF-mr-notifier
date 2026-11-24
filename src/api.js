@@ -1,11 +1,14 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import * as db from './db.js';
 import { platforms, getOptions, PROJECT_TYPES } from './platforms.js';
-import { guildMeta, searchMembers, sendToChannel, explainSendError, botInGuild, inviteUrl } from './bot.js';
+import { guildMeta, searchMembers, resolveMembers, sendToChannel, explainSendError, botInGuild, inviteUrl } from './bot.js';
 import { requireAuth, requireGuild } from './auth.js';
 import { DEFAULT_DISPLAY, buildMessage } from './embed.js';
+import { GH_EVENTS, DEFAULT_GH_EVENTS, buildGithubMessage, samplePayload } from './github-events.js';
 import { processProject, primeSource } from './poller.js';
 import { colorFromString } from './util.js';
+import { publicUrl } from './config.js';
 
 const SNOW = /^\d{15,25}$/;
 const MAX_PROJECTS_PER_GUILD = 30;
@@ -51,8 +54,10 @@ function cleanInput(b, meta, partial = false) {
   if (has('enabled')) out.enabled = b.enabled !== false;
   if (has('merge_platforms')) out.merge_platforms = b.merge_platforms !== false;
   if (has('merge_wait_minutes')) out.merge_wait_minutes = clamp(parseInt(b.merge_wait_minutes ?? 15, 10) || 0, 0, 120);
+  if (has('mention_everyone')) out.mention_everyone = b.mention_everyone === true;
+  if (has('mention_here')) out.mention_here = b.mention_here === true;
   if (has('mention_role_ids')) {
-    out.mention_role_ids = strArr(b.mention_role_ids, 10, 25, SNOW).filter((id) => meta.roles.some((r) => r.id === id) || id === meta.id);
+    out.mention_role_ids = strArr(b.mention_role_ids, 10, 25, SNOW).filter((id) => meta.roles.some((r) => r.id === id));
   }
   if (has('mention_user_ids')) out.mention_user_ids = strArr(b.mention_user_ids, 10, 25, SNOW);
   if (has('filters')) {
@@ -77,13 +82,25 @@ function cleanInput(b, meta, partial = false) {
   return out;
 }
 
+// 通知元ごとの設定(GitHubは「どのイベントを通知するか」「どのブランチか」)
+function cleanSourceConfig(platform, raw) {
+  if (platform !== 'github') return {};
+  const events = strArr(raw?.events, 20, 30).filter((e) => GH_EVENTS.includes(e));
+  return {
+    events: events.length ? events : [...DEFAULT_GH_EVENTS],
+    branches: strArr(raw?.branches, 20, 100),
+  };
+}
+
 async function resolveSource(s) {
   if (!s || !platforms[s.platform]) throw bad('不明なプラットフォームです');
   const id = String(s.external_id || '').trim();
   if (!id || id.length > 200) throw bad('プロジェクトIDが正しくありません');
   try {
     const info = await platforms[s.platform].fetchInfo(id);
-    return { platform: s.platform, external_id: info.id, display_name: info.name, icon_url: info.iconUrl, project_type: info.projectType };
+    const config = cleanSourceConfig(s.platform, s.config);
+    if (s.platform === 'github') config.webhook_secret = crypto.randomBytes(24).toString('hex');
+    return { platform: s.platform, external_id: info.id, display_name: info.name, icon_url: info.iconUrl, project_type: info.projectType, config };
   } catch (e) {
     if (e.expose) throw e;
     throw bad(`${s.platform} でプロジェクトが見つかりません(${id})`);
@@ -94,6 +111,24 @@ async function ownedProject(gid, pid) {
   const p = await db.getProject(pid);
   if (!p || p.guild_id !== gid) throw bad('プロジェクトが見つかりません', 404);
   return p;
+}
+
+function publicSource(s) {
+  const out = {
+    id: s.id,
+    platform: s.platform,
+    external_id: s.external_id,
+    display_name: s.display_name,
+    icon_url: s.icon_url,
+    project_type: s.project_type,
+    last_checked_at: s.last_checked_at,
+    last_error: s.last_error,
+  };
+  if (s.platform === 'github') {
+    out.config = { events: s.config?.events || [...DEFAULT_GH_EVENTS], branches: s.config?.branches || [] };
+    out.webhook = { url: `${publicUrl()}/webhooks/github/${s.id}`, secret: s.config?.webhook_secret || null };
+  }
+  return out;
 }
 
 function publicProject(p) {
@@ -107,6 +142,8 @@ function publicProject(p) {
     enabled: p.enabled,
     merge_platforms: p.merge_platforms,
     merge_wait_minutes: p.merge_wait_minutes,
+    mention_everyone: !!p.mention_everyone,
+    mention_here: !!p.mention_here,
     mention_role_ids: p.mention_role_ids,
     mention_user_ids: p.mention_user_ids,
     filters: { game_versions: [], loaders: [], version_types: [], ...(p.filters || {}) },
@@ -114,18 +151,7 @@ function publicProject(p) {
     last_sent_at: p.last_sent_at,
     last_error: p.last_error,
     created_at: p.created_at,
-    sources: (p.sources || [])
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .map((s) => ({
-        id: s.id,
-        platform: s.platform,
-        external_id: s.external_id,
-        display_name: s.display_name,
-        icon_url: s.icon_url,
-        project_type: s.project_type,
-        last_checked_at: s.last_checked_at,
-        last_error: s.last_error,
-      })),
+    sources: (p.sources || []).sort((a, b) => a.created_at.localeCompare(b.created_at)).map(publicSource),
   };
 }
 
@@ -146,11 +172,15 @@ apiRouter.get('/me', (req, res) => {
   res.json({ user: { id: req.user.sub, name: req.user.name, avatarUrl: req.user.avatar }, guilds });
 });
 
-// 絞り込み・検索用の候補(対応バージョン / ローダー / 種類)
+// 絞り込み・検索用の候補(対応バージョン / ローダー / 種類 / GitHubのイベント)
 apiRouter.get(
   '/options',
   wrap(async (req, res) => {
-    res.json({ ...(await getOptions()), defaults: { display: DEFAULT_DISPLAY, merge_wait_minutes: 15 } });
+    res.json({
+      ...(await getOptions()),
+      githubEvents: GH_EVENTS,
+      defaults: { display: DEFAULT_DISPLAY, merge_wait_minutes: 15, githubEvents: DEFAULT_GH_EVENTS },
+    });
   }),
 );
 
@@ -176,6 +206,14 @@ apiRouter.use('/guilds/:gid', requireGuild, guild);
 guild.get(
   '/meta',
   wrap(async (req, res) => res.json(await guildMeta(req.params.gid))),
+);
+
+guild.get(
+  '/members/resolve',
+  wrap(async (req, res) => {
+    const ids = strArr(String(req.query.ids || '').split(','), 10, 25, SNOW);
+    res.json({ members: await resolveMembers(req.params.gid, ids) });
+  }),
 );
 
 guild.get(
@@ -211,8 +249,8 @@ guild.post(
     }
     const p = await db.createProject({ guild_id: gid, created_by: req.user.sub, ...input });
     for (const r of resolved) {
-      const row = await db.addSource({ project_id: p.id, ...r });
-      await primeSource(row).catch(() => {});
+      const row = await db.addSource({ project_id: p.id, ...r, primed: r.platform === 'github' });
+      if (r.platform !== 'github') await primeSource(row).catch(() => {});
     }
     res.json({ project: publicProject(await db.getProject(p.id)) });
   }),
@@ -235,6 +273,9 @@ guild.put(
         const existing = p.sources.find((x) => x.platform === s.platform && x.external_id === String(s.external_id));
         if (existing) {
           keep.add(existing.id);
+          if (existing.platform === 'github' && s.config) {
+            await db.updateSource(existing.id, { config: { ...(existing.config || {}), ...cleanSourceConfig('github', s.config) } });
+          }
           continue;
         }
         const r = await resolveSource(s);
@@ -243,9 +284,9 @@ guild.put(
           keep.add(dup.id);
           continue;
         }
-        const row = await db.addSource({ project_id: p.id, ...r });
+        const row = await db.addSource({ project_id: p.id, ...r, primed: r.platform === 'github' });
         keep.add(row.id);
-        await primeSource(row).catch(() => {});
+        if (r.platform !== 'github') await primeSource(row).catch(() => {});
       }
       for (const s of p.sources) if (!keep.has(s.id)) await db.deleteSource(s.id);
     }
@@ -263,18 +304,25 @@ guild.delete(
   }),
 );
 
-// テスト送信: 更新がなくても、今の設定で最新バージョンを通知チャンネルに送る(メンションなし)
+// テスト送信: 更新がなくても、今の設定でサンプル/最新の内容を通知チャンネルに送る(メンションなし)
 guild.post(
   '/projects/:pid/test',
   wrap(async (req, res) => {
     const p = await ownedProject(req.params.gid, req.params.pid);
-    // 保存前の設定でも試せるよう、リクエストに設定が含まれていれば上書きして使う
     const meta = await guildMeta(req.params.gid);
     const override = req.body && Object.keys(req.body).length ? cleanInput(req.body, meta, true) : {};
     const project = { ...p, ...override };
 
     const newest = [];
+    const messages = [];
     for (const s of p.sources) {
+      if (s.platform === 'github') {
+        // GitHubはWebhook型なので、選んだイベントのサンプルを送る(先頭の1種類)
+        const ev = (s.config?.events || DEFAULT_GH_EVENTS)[0];
+        const msg = buildGithubMessage(project, s, ev, samplePayload(ev, s.external_id), { test: true });
+        if (msg) messages.push(msg);
+        continue;
+      }
       try {
         const { candidates, load } = await platforms[s.platform].fetchRecent(s.external_id);
         const rels = await load(candidates);
@@ -284,17 +332,22 @@ guild.post(
         throw bad(`${s.platform} から取得できませんでした: ${e.message}`, 502);
       }
     }
-    if (!newest.length) throw bad('取得できるバージョンがありません');
-    const groups = project.merge_platforms ? [newest] : newest.map((r) => [r]);
+    const groups = project.merge_platforms && newest.length ? [newest] : newest.map((r) => [r]);
     try {
       for (const g of groups) {
         for (const r of g) await platforms[r.platform].hydrate(r);
-        await sendToChannel(project.channel_id, buildMessage(project, g, { test: true }));
+        messages.push(buildMessage(project, g, { test: true }));
       }
     } catch (e) {
       throw bad(explainSendError(e), 502);
     }
-    res.json({ ok: true, sent: groups.length });
+    if (!messages.length) throw bad('送信できる内容がありません');
+    try {
+      for (const m of messages) await sendToChannel(project.channel_id, m);
+    } catch (e) {
+      throw bad(explainSendError(e), 502);
+    }
+    res.json({ ok: true, sent: messages.length });
   }),
 );
 
