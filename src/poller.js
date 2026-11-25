@@ -2,7 +2,7 @@ import { platforms, isPolledSource } from './platforms.js';
 import * as db from './db.js';
 import { buildMessage } from './embed.js';
 import { sendToChannel, explainSendError } from './bot.js';
-import { sleep, matchVersion } from './util.js';
+import { sleep, matchVersion, effectiveFilters } from './util.js';
 
 /* ---------- フィルタ ---------- */
 export function passesFilters(rel, f = {}) {
@@ -116,7 +116,7 @@ export async function processProject(project) {
   // フィルタに合わないものは通知せず既読にする
   const pass = [];
   const skip = [];
-  for (const r of fresh) (passesFilters(r, project.filters) ? pass : skip).push(r);
+  for (const r of fresh) (passesFilters(r, effectiveFilters(project, r.sourceId)) ? pass : skip).push(r);
   await markReleases(skip);
 
   const variants = project.merge_variants !== false;
@@ -132,7 +132,8 @@ export async function processProject(project) {
       if (variants) {
         // 作品が対応しているローダー(絞り込みがあればその中だけ)のファイルが揃ったら待たずに通知する
         const supported = new Set(g.flatMap((r) => lc(r.info?.loaders)));
-        const wanted = lc(project.filters?.loaders);
+        const effs = g.map((r) => lc(effectiveFilters(project, r.sourceId).loaders));
+        const wanted = effs.some((e) => !e.length) ? [] : [...new Set(effs.flat())];
         const expected = wanted.length ? [...supported].filter((l) => wanted.includes(l)) : [...supported];
         const have = new Set(g.flatMap((r) => lc(r.loaders)));
         loadersDone = expected.length <= 1 || expected.every((l) => have.has(l));

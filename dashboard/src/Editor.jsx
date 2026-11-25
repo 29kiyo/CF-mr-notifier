@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import SendLatestModal from './SendLatest.jsx';
+import SourceFilters from './SourceFilters.jsx';
 import FiltersSection from './Filters.jsx';
 import { api, errorMessage, go, useAsync, useDebounced } from './lib.js';
 import { toast, Switch, Chip, Section, Field, Spinner, PlatformBadge, Select, Avatar, CopyButton, fmtNum } from './ui.jsx';
@@ -95,6 +96,7 @@ function projectToForm(p) {
       external_id: s.external_id,
       id: s.id,
       name: s.display_name,
+      ...(s.platform !== 'github' ? { config: { filters: { loaders: [...(s.config?.filters?.loaders || [])], game_versions: [...(s.config?.filters?.game_versions || [])] } } } : {}),
       iconUrl: s.icon_url,
       ...(s.platform === 'github' ? { config: { mode: s.config?.mode === 'release' ? 'release' : 'webhook', events: [...(s.config?.events || [])], branches: [...(s.config?.branches || [])] }, webhook: s.webhook } : {}),
     })),
@@ -115,7 +117,7 @@ function formToInput(f) {
     mention_user_ids: f.mention_user_ids,
     filters: f.filters,
     display: { ...f.display, changelog_max_chars: clamp(f.display.changelog_max_chars, 0, 3500) },
-    sources: f.sources.map((s) => ({ platform: s.platform, external_id: s.external_id, ...(s.platform === 'github' ? { config: s.config } : {}) })),
+    sources: f.sources.map((s) => ({ platform: s.platform, external_id: s.external_id, ...(s.config ? { config: s.config } : {}) })),
   };
 }
 function validate(f) {
@@ -363,7 +365,7 @@ function BasicSection({ form, set, errors, channels }) {
 }
 
 /* ================= 通知元 ================= */
-function SourcesSection({ form, set, error, saved, gid, pid, onWebhook }) {
+function SourcesSection({ form, set, error, saved, gid, pid, onWebhook, options }) {
   const [platform, setPlatform] = useState('modrinth');
   const [type, setType] = useState('mod');
   // 検索欄はサイトごとに別々に持つ(追加したらその欄だけ空にする)
@@ -393,6 +395,7 @@ function SourcesSection({ form, set, error, saved, gid, pid, onWebhook }) {
     if (form.sources.length >= MAX_SOURCES) return toast(`通知元は最大${MAX_SOURCES}個までです`, 'error');
     if (has(it)) return;
     const src = { platform: it.platform, external_id: it.id, name: it.name, iconUrl: it.iconUrl };
+    if (it.platform !== 'github') src.config = { filters: { loaders: [], game_versions: [] } };
     if (it.platform === 'github') src.config = { ...DEFAULT_GH_CONFIG, events: [...DEFAULT_GH_CONFIG.events], branches: [] };
     set('sources', [...form.sources, src]);
     setQ('');
@@ -427,6 +430,7 @@ function SourcesSection({ form, set, error, saved, gid, pid, onWebhook }) {
                 ×
               </button>
             </div>
+            {s.platform !== 'github' && <SourceFilters s={s} onChange={(patch) => updateSource(s, patch)} globalFilters={form.filters} options={options} />}
             {s.platform === 'github' && <GithubConfig s={s} onChange={(patch) => updateSource(s, patch)} saved={saved} gid={gid} pid={pid} onWebhook={onWebhook} />}
           </div>
         ))}

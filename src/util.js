@@ -86,3 +86,13 @@ export function matchVersion(v, g) {
   if (g.endsWith('.*')) return v === g.slice(0, -2) || v.startsWith(g.slice(0, -1));
   return v === g;
 }
+// 作品(通知元)ごとの個別指定があればそれを使い、なければプロジェクト全体の絞り込みを使う
+export function effectiveFilters(project, sourceId) {
+  const base = project.filters || {};
+  const own = (project.sources || []).find((s) => s.id === sourceId)?.config?.filters || {};
+  return {
+    ...base,
+    loaders: own.loaders?.length ? own.loaders : base.loaders || [],
+    game_versions: own.game_versions?.length ? own.game_versions : base.game_versions || [],
+  };
+}

@@ -101,7 +101,11 @@ function cleanInput(b, meta, partial = false) {
 
 // 通知元ごとの設定。GitHubは mode で「Webhook(できごと通知)」と「release(従来のバージョン通知)」を切り替える。
 function cleanSourceConfig(platform, raw) {
-  if (platform !== 'github') return {};
+  if (platform !== 'github') {
+    // Modrinth / CurseForge: この作品だけのローダー・バージョン指定(空なら全体の絞り込みを使う)
+    const f = raw?.filters || {};
+    return { filters: { loaders: strArr(f.loaders, 20, 40), game_versions: strArr(f.game_versions, 60, 40) } };
+  }
   const events = strArr(raw?.events, 20, 30).filter((e) => GH_EVENTS.includes(e));
   return {
     mode: raw?.mode === 'release' ? 'release' : 'webhook',
@@ -141,6 +145,7 @@ function publicSource(s) {
     project_type: s.project_type,
     last_checked_at: s.last_checked_at,
     last_error: s.last_error,
+    config: { filters: { loaders: s.config?.filters?.loaders || [], game_versions: s.config?.filters?.game_versions || [] } },
   };
   if (s.platform === 'github') {
     out.config = { mode: s.config?.mode === 'release' ? 'release' : 'webhook', events: s.config?.events || [...DEFAULT_GH_EVENTS], branches: s.config?.branches || [] };
@@ -182,6 +187,9 @@ async function newestReleases(p) {
       const { candidates, load } = await platforms[s.platform].fetchRecent(s.external_id);
       const rels = await load(candidates);
       rels.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+      rels.forEach((r) => {
+        r.sourceId = s.id;
+      });
       if (!rels[0]) continue;
       out.push(rels[0]);
       if (p.merge_variants !== false) {
@@ -374,8 +382,8 @@ guild.put(
         const existing = p.sources.find((x) => x.platform === s.platform && x.external_id === String(s.external_id));
         if (existing) {
           keep.add(existing.id);
-          if (existing.platform === 'github' && s.config) {
-            const nc = cleanSourceConfig('github', s.config);
+          if (s.config) {
+            const nc = cleanSourceConfig(existing.platform, s.config);
             const patch = { config: { ...(existing.config || {}), ...nc } };
             // Webhook型 → 従来のリリース通知に切り替えたときは、過去のリリースを一度に通知しないよう「既読」から始め直す
             if (nc.mode === 'release' && existing.config?.mode !== 'release') patch.primed = false;

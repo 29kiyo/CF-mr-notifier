@@ -1,4 +1,4 @@
-import { cleanChangelog, truncate, matchVersion } from './util.js';
+import { cleanChangelog, truncate, matchVersion, effectiveFilters } from './util.js';
 
 export const LINK_KINDS = ['website', 'wiki', 'source', 'issues', 'discord', 'donation'];
 
@@ -107,10 +107,16 @@ export function buildMessage(project, group, { test = false } = {}) {
   const main = rels[0];
 
   // 絞り込みで選んだローダー・バージョンがあれば、それに関するものだけを表示する
-  const wantLoaders = (project.filters?.loaders || []).map((l) => l.toLowerCase());
-  const wantVersions = project.filters?.game_versions || [];
-  const loadersOf = (r) => (r.loaders || []).filter((l) => !wantLoaders.length || wantLoaders.includes(l.toLowerCase()));
-  const versionsOf = (r) => (r.gameVersions || []).filter((v) => !wantVersions.length || wantVersions.some((g) => matchVersion(v, g)));
+  const eff = (r) => effectiveFilters(project, r.sourceId);
+  // (作品ごとの個別指定があればそれを、なければ全体の絞り込みを使う)
+  const loadersOf = (r) => {
+    const want = (eff(r).loaders || []).map((l) => l.toLowerCase());
+    return (r.loaders || []).filter((l) => !want.length || want.includes(l.toLowerCase()));
+  };
+  const versionsOf = (r) => {
+    const want = eff(r).game_versions || [];
+    return (r.gameVersions || []).filter((v) => !want.length || want.some((g) => matchVersion(v, g)));
+  };
 
   const embed = {
     title: truncate(`${project.name || main.info.name} ${titleVersion(rels, main)}`.trim(), 256),
