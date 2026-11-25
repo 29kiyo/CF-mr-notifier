@@ -17,6 +17,20 @@ export const GH_EVENTS = [
 ];
 export const DEFAULT_GH_CONFIG = { mode: 'webhook', events: ['push', 'release'], branches: [] };
 
+// GitHubのWebhook設定画面で、個別にイベントを選ぶときの表示名
+const GH_NAMES = {
+  push: 'Pushes',
+  release: 'Releases',
+  issues: 'Issues',
+  pull_request: 'Pull requests',
+  issue_comment: 'Issue comments',
+  create: 'Branch or tag creation',
+  delete: 'Branch or tag deletion',
+  fork: 'Forks',
+  star: 'Stars',
+  workflow_run: 'Workflow runs',
+};
+
 function CopyRow({ label, value }) {
   return (
     <div className="copyrow">
@@ -76,6 +90,7 @@ export default function GithubConfig({ s, onChange, saved, gid, pid, onWebhook }
 
 function WebhookSettings({ s, cfg, onChange, saved, canRotate, rotate }) {
   const [bq, setBq] = useState('');
+  const ghNames = cfg.events.map((e) => GH_NAMES[e]).filter(Boolean);
   const toggle = (ev) => onChange({ config: { ...cfg, events: cfg.events.includes(ev) ? cfg.events.filter((x) => x !== ev) : [...cfg.events, ev] } });
   const addBranch = () => {
     const v = bq.trim();
@@ -141,7 +156,21 @@ function WebhookSettings({ s, cfg, onChange, saved, canRotate, rotate }) {
             <CopyRow label="Secret" value={s.webhook.secret} />
             <div className="copyrow">
               <span className="clabel">イベント</span>
-              <span className="small">「Send me everything」を選べばOK(ボットが上で選んだものだけ通知します)</span>
+              <span className="small">
+                「Which events would you like to trigger this webhook?」では、<b>「Send me everything」</b>を選ぶのがかんたんです(ボットが、上で選んだ内容だけを通知します)。
+                <br />
+                細かく選びたいときは<b>「Let me select individual events」</b>を選び、次の項目にだけチェックを入れてください: <b>{ghNames.length ? ghNames.join(' / ') : '(上で通知する内容を選んでください)'}</b>
+              </span>
+            </div>
+            <div className="copyrow">
+              <span className="clabel">SSL</span>
+              <span className="small">
+                「SSL verification」は、初期設定の<b>「Enable SSL verification」のまま</b>にしてください(オフにしないでください)。
+              </span>
+            </div>
+            <div className="copyrow">
+              <span className="clabel">Active</span>
+              <span className="small">「Active」に<b>チェックが入ったまま</b>にしてください。</span>
             </div>
             <p className="hint">入力して「Add webhook」を押すと、GitHubが確認のメッセージを送ります。リポジトリの管理者権限が必要です。</p>
             {canRotate && (
