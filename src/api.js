@@ -5,7 +5,7 @@ import * as db from './db.js';
 import { platforms, getOptions, PROJECT_TYPES, isPolledSource, ghLatestPayloads } from './platforms.js';
 import { guildMeta, searchMembers, resolveMembers, sendToChannel, explainSendError, botInGuild, inviteUrl } from './bot.js';
 import { requireAuth, requireGuild } from './auth.js';
-import { DEFAULT_DISPLAY, LINK_KINDS, buildMessage } from './embed.js';
+import { DEFAULT_DISPLAY, LINK_KINDS, buildMessage, setKnownGameVersions } from './embed.js';
 import { GH_EVENTS, DEFAULT_GH_EVENTS, buildGithubMessage, samplePayload } from './github-events.js';
 import { processProject, primeSource, groupReleases, sameVersion } from './poller.js';
 import { colorFromString } from './util.js';
@@ -205,6 +205,11 @@ async function newestReleases(p) {
 }
 
 async function buildPolledMessages(project, releases, opts) {
+  try {
+    setKnownGameVersions((await getOptions()).gameVersions);
+  } catch {
+    /* 取得できなければ、まとめ表示(26.1.x)なしで送る */
+  }
   const groups = groupReleases(releases, { crossPlatform: !!project.merge_platforms, variants: project.merge_variants !== false });
   const out = [];
   for (const g of groups) {

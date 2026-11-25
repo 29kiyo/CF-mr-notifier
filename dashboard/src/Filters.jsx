@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './lib.js';
 import { Chip, Section, Field } from './ui.jsx';
+import { withLineChips, isLineChip } from './versionLines.js';
 
 const VTYPES = [
   ['release', 'リリース', '🟢'],
@@ -59,7 +60,7 @@ export default function FiltersSection({ form, setFilter, options }) {
   }, [narrowed, rel, options]);
 
   const toggle = (key, val) => setFilter(key, f[key].includes(val) ? f[key].filter((x) => x !== val) : [...f[key], val]);
-  const list = all.filter((v) => v.toLowerCase().includes(vq.trim().toLowerCase())).slice(0, 80);
+  const list = withLineChips(all).filter((v) => v.toLowerCase().includes(vq.trim().toLowerCase())).slice(0, 100);
   const custom = vq.trim();
   const canAddCustom = custom && !f.game_versions.includes(custom) && !all.includes(custom);
 
@@ -137,7 +138,7 @@ export default function FiltersSection({ form, setFilter, options }) {
           )}
           {list.length === 0 && !canAddCustom && <span className="muted small">該当するバージョンがありません</span>}
           {list.map((v) => (
-            <button key={v} type="button" aria-pressed={f.game_versions.includes(v)} className={'ver' + (f.game_versions.includes(v) ? ' sel' : '')} onClick={() => toggle('game_versions', v)}>
+            <button key={v} type="button" aria-pressed={f.game_versions.includes(v)} className={'ver' + (f.game_versions.includes(v) ? ' sel' : '') + (isLineChip(v) ? ' linechip' : '')} onClick={() => toggle('game_versions', v)}>
               {v}
             </button>
           ))}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './lib.js';
 import { Chip, Switch } from './ui.jsx';
+import { withLineChips, isLineChip } from './versionLines.js';
 
 const LOADER_LABEL = { neoforge: 'NeoForge', liteloader: 'LiteLoader', bungeecord: 'BungeeCord', optifine: 'OptiFine' };
 const loaderLabel = (n) => LOADER_LABEL[n] || n.charAt(0).toUpperCase() + n.slice(1);
@@ -41,7 +42,7 @@ export default function SourceFilters({ s, onChange, globalFilters, options }) {
     return [...global.filter((n) => rel.loaders.includes(n)), ...rel.loaders.filter((n) => !global.includes(n))];
   }, [rel, options]);
 
-  const list = versions.filter((v) => v.toLowerCase().includes(vq.trim().toLowerCase())).slice(0, 60);
+  const list = withLineChips(versions).filter((v) => v.toLowerCase().includes(vq.trim().toLowerCase())).slice(0, 80);
   const custom = vq.trim();
   const canAddCustom = custom && !own.game_versions.includes(custom) && !versions.includes(custom);
   const summary = (arr, empty) => (arr.length ? arr.join(', ') : empty);
@@ -110,7 +111,7 @@ export default function SourceFilters({ s, onChange, globalFilters, options }) {
             )}
             {list.length === 0 && !canAddCustom && <span className="muted small">該当するバージョンがありません</span>}
             {list.map((v) => (
-              <button key={v} type="button" aria-pressed={own.game_versions.includes(v)} className={'ver' + (own.game_versions.includes(v) ? ' sel' : '')} onClick={() => toggle('game_versions', v)}>
+              <button key={v} type="button" aria-pressed={own.game_versions.includes(v)} className={'ver' + (own.game_versions.includes(v) ? ' sel' : '') + (isLineChip(v) ? ' linechip' : '')} onClick={() => toggle('game_versions', v)}>
                 {v}
               </button>
             ))}

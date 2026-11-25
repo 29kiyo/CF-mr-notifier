@@ -1,6 +1,6 @@
-import { platforms, isPolledSource } from './platforms.js';
+import { platforms, isPolledSource, getOptions } from './platforms.js';
 import * as db from './db.js';
-import { buildMessage } from './embed.js';
+import { buildMessage, setKnownGameVersions } from './embed.js';
 import { sendToChannel, explainSendError } from './bot.js';
 import { sleep, matchVersion, effectiveFilters } from './util.js';
 
@@ -73,6 +73,11 @@ export async function primeSource(source) {
 }
 
 export async function processProject(project) {
+  try {
+    setKnownGameVersions((await getOptions()).gameVersions);
+  } catch {
+    /* 取得できなければ、まとめ表示(26.1.x)なしで通知する */
+  }
   const fresh = [];
   const now = () => new Date().toISOString();
   const polled = project.sources.filter(isPolledSource);

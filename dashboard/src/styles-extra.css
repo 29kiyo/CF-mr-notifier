@@ -66,3 +66,7 @@
 .srcwrap.open .src-chev { transform: rotate(90deg); color: var(--text); }
 .srcwrap.open > .src { background: rgba(88, 101, 242, .14); }
 .ownpill { font-size: .68rem; font-weight: 700; border-radius: 99px; padding: .1rem .55rem; color: #c9cdfb; background: rgba(88, 101, 242, .3); white-space: nowrap; }
+
+/* ---- バージョン一覧の「26.1.x」(系統まとめ) ---- */
+.ver.linechip { font-weight: 700; border: 1px dashed var(--primary); background: rgba(88, 101, 242, .12); }
+.ver.linechip.sel { background: var(--primary); }

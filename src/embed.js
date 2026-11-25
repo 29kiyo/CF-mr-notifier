@@ -2,6 +2,42 @@ import { cleanChangelog, truncate, matchVersion, effectiveFilters } from './util
 
 export const LINK_KINDS = ['website', 'wiki', 'source', 'issues', 'discord', 'donation'];
 
+// Modrinthの「リリース版のゲームバージョン一覧」。ある系統(26.1 など)のバージョンを全部含むときに「26.1.x」とまとめて表示するために使う。
+let KNOWN_VERSIONS = [];
+export function setKnownGameVersions(list) {
+  KNOWN_VERSIONS = Array.isArray(list) ? list : [];
+}
+const lineOf = (v) => {
+  const m = /^(\d+)\.(\d+)(?:\.\d+)?$/.exec(v);
+  return m ? `${m[1]}.${m[2]}` : null;
+};
+function collapseLines(list) {
+  if (!KNOWN_VERSIONS.length) return list;
+  const have = new Set(list);
+  const lines = new Map();
+  for (const v of KNOWN_VERSIONS) {
+    const k = lineOf(v);
+    if (!k) continue;
+    if (!lines.has(k)) lines.set(k, []);
+    lines.get(k).push(v);
+  }
+  const out = [];
+  const done = new Set();
+  for (const v of list) {
+    const k = lineOf(v);
+    const full = k && lines.get(k);
+    if (full && full.length >= 2 && full.every((x) => have.has(x))) {
+      if (!done.has(k)) {
+        done.add(k);
+        out.push(`${k}.x`);
+      }
+      continue;
+    }
+    out.push(v);
+  }
+  return out;
+}
+
 export const DEFAULT_DISPLAY = {
   language: 'ja',
   show_changelog: true,
@@ -162,7 +198,8 @@ export function buildMessage(project, group, { test = false } = {}) {
     if (ls.length) fields.push({ name: L.loaders, value: truncate(ls.map(fmtLoader).join(', '), 1024), inline: true });
   }
   if (d.show_game_versions) {
-    const gv = rels.flatMap(versionsOf);
+    // その系統のバージョンを全部含んでいるときは、Modrinthの表示と同じように「26.1.x」とまとめる
+    const gv = collapseLines(uniq(rels.flatMap(versionsOf)));
     if (gv.length) fields.push({ name: L.gameVersions, value: truncate(compactVersions(gv, L.more), 1024), inline: true });
   }
   if (d.show_downloads) {
