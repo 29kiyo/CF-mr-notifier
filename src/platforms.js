@@ -343,3 +343,39 @@ export function getOptions() {
     };
   });
 }
+
+
+// 定期チェック(ポーリング)する通知元か?
+// GitHubは通常Webhookで受け取る。config.mode が 'release' のときだけ従来どおりリリースを定期チェックする。
+export const isPolledSource = (s) => s.platform !== 'github' || s.config?.mode === 'release';
+
+// 「最新の情報を送る」用: GitHubのWebhook型の通知元から、最新のリリースと最新のコミットを取得してWebhook形式にそろえる
+export async function ghLatestPayloads(repoId, events = []) {
+  const repo = parseRepo(repoId);
+  const out = [];
+  const info = await ghFetchInfo(repo);
+  const repository = { full_name: repo, name: repo.split('/')[1], html_url: info.url, stargazers_count: info.stars };
+  const fallback = !events.includes('push') && !events.includes('release');
+  if (events.includes('release') || fallback) {
+    const rels = (await ghGet(`/repos/${repo}/releases?per_page=3`)).filter((r) => !r.draft);
+    if (rels[0]) out.push({ event: 'release', payload: { action: 'published', release: rels[0], repository, sender: rels[0].author } });
+  }
+  if (events.includes('push') || fallback) {
+    const data = await ghGet(`/repos/${repo}`);
+    const branch = data.default_branch || 'main';
+    const cs = await ghGet(`/repos/${repo}/commits?sha=${enc(branch)}&per_page=3`);
+    if (cs.length) {
+      out.push({
+        event: 'push',
+        payload: {
+          ref: `refs/heads/${branch}`,
+          compare: `${info.url}/commits/${branch}`,
+          commits: [...cs].reverse().map((c) => ({ id: c.sha, url: c.html_url, message: c.commit?.message || '', author: { username: c.author?.login, name: c.commit?.author?.name } })),
+          repository,
+          sender: cs[0].author,
+        },
+      });
+    }
+  }
+  return out;
+}

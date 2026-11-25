@@ -1,7 +1,8 @@
 import express from 'express';
 import crypto from 'node:crypto';
+import rateLimit from 'express-rate-limit';
 import * as db from './db.js';
-import { platforms, getOptions, PROJECT_TYPES } from './platforms.js';
+import { platforms, getOptions, PROJECT_TYPES, isPolledSource, ghLatestPayloads } from './platforms.js';
 import { guildMeta, searchMembers, resolveMembers, sendToChannel, explainSendError, botInGuild, inviteUrl } from './bot.js';
 import { requireAuth, requireGuild } from './auth.js';
 import { DEFAULT_DISPLAY, buildMessage } from './embed.js';
@@ -17,6 +18,20 @@ const MAX_SOURCES = 6;
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status, expose: true });
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+
+// ログインしている人ごとの回数制限(検索・変更・Discordへの送信の連打を防ぐ)
+const byUser = (max, windowMs, message) =>
+  rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => String(req.user?.sub || 'anonymous'),
+    message: { error: message },
+  });
+const searchLimit = byUser(40, 60_000, '検索が多すぎます。少し待ってからお試しください');
+const writeLimit = byUser(60, 60_000, '操作が多すぎます。少し待ってからお試しください');
+const sendLimit = byUser(10, 60_000, 'メッセージの送信が多すぎます。1分ほど待ってからお試しください');
 
 function strArr(a, max, maxLen, re) {
   if (!Array.isArray(a)) return [];
@@ -82,11 +97,12 @@ function cleanInput(b, meta, partial = false) {
   return out;
 }
 
-// 通知元ごとの設定(GitHubは「どのイベントを通知するか」「どのブランチか」)
+// 通知元ごとの設定。GitHubは mode で「Webhook(できごと通知)」と「release(従来のバージョン通知)」を切り替える。
 function cleanSourceConfig(platform, raw) {
   if (platform !== 'github') return {};
   const events = strArr(raw?.events, 20, 30).filter((e) => GH_EVENTS.includes(e));
   return {
+    mode: raw?.mode === 'release' ? 'release' : 'webhook',
     events: events.length ? events : [...DEFAULT_GH_EVENTS],
     branches: strArr(raw?.branches, 20, 100),
   };
@@ -125,7 +141,7 @@ function publicSource(s) {
     last_error: s.last_error,
   };
   if (s.platform === 'github') {
-    out.config = { events: s.config?.events || [...DEFAULT_GH_EVENTS], branches: s.config?.branches || [] };
+    out.config = { mode: s.config?.mode === 'release' ? 'release' : 'webhook', events: s.config?.events || [...DEFAULT_GH_EVENTS], branches: s.config?.branches || [] };
     out.webhook = { url: `${publicUrl()}/webhooks/github/${s.id}`, secret: s.config?.webhook_secret || null };
   }
   return out;
@@ -153,6 +169,41 @@ function publicProject(p) {
     created_at: p.created_at,
     sources: (p.sources || []).sort((a, b) => a.created_at.localeCompare(b.created_at)).map(publicSource),
   };
+}
+
+// 定期チェック型の通知元から、それぞれの最新バージョンを1件ずつ取る
+async function newestReleases(p) {
+  const newest = [];
+  for (const s of p.sources.filter(isPolledSource)) {
+    try {
+      const { candidates, load } = await platforms[s.platform].fetchRecent(s.external_id);
+      const rels = await load(candidates);
+      rels.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+      if (rels[0]) newest.push(rels[0]);
+    } catch (e) {
+      throw bad(`${s.platform} から取得できませんでした: ${e.message}`, 502);
+    }
+  }
+  return newest;
+}
+
+async function buildPolledMessages(project, newest, opts) {
+  const groups = project.merge_platforms && newest.length ? [newest] : newest.map((r) => [r]);
+  const out = [];
+  for (const g of groups) {
+    for (const r of g) await platforms[r.platform].hydrate(r);
+    out.push(buildMessage(project, g, opts));
+  }
+  return out;
+}
+
+async function deliver(project, messages) {
+  if (!messages.length) throw bad('送信できる内容がありません');
+  try {
+    for (const m of messages) await sendToChannel(project.channel_id, m);
+  } catch (e) {
+    throw bad(explainSendError(e), 502);
+  }
 }
 
 export const apiRouter = express.Router();
@@ -186,6 +237,7 @@ apiRouter.get(
 
 apiRouter.get(
   '/search',
+  searchLimit,
   wrap(async (req, res) => {
     const platform = String(req.query.platform || '');
     const type = PROJECT_TYPES.includes(String(req.query.type)) ? String(req.query.type) : 'mod';
@@ -203,6 +255,13 @@ apiRouter.get(
 const guild = express.Router({ mergeParams: true });
 apiRouter.use('/guilds/:gid', requireGuild, guild);
 
+// 変更系の操作は回数を制限し、誰が何をしたか記録する(内容は記録しない)
+guild.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  console.log(`[audit] user=${req.user.sub} ${req.method} ${req.originalUrl.split('?')[0]}`);
+  writeLimit(req, res, next);
+});
+
 guild.get(
   '/meta',
   wrap(async (req, res) => res.json(await guildMeta(req.params.gid))),
@@ -218,6 +277,7 @@ guild.get(
 
 guild.get(
   '/members',
+  searchLimit,
   wrap(async (req, res) => {
     try {
       res.json({ members: await searchMembers(req.params.gid, String(req.query.q || '').slice(0, 50)) });
@@ -249,8 +309,9 @@ guild.post(
     }
     const p = await db.createProject({ guild_id: gid, created_by: req.user.sub, ...input });
     for (const r of resolved) {
-      const row = await db.addSource({ project_id: p.id, ...r, primed: r.platform === 'github' });
-      if (r.platform !== 'github') await primeSource(row).catch(() => {});
+      const polled = isPolledSource(r);
+      const row = await db.addSource({ project_id: p.id, ...r, primed: !polled });
+      if (polled) await primeSource(row).catch(() => {});
     }
     res.json({ project: publicProject(await db.getProject(p.id)) });
   }),
@@ -274,7 +335,11 @@ guild.put(
         if (existing) {
           keep.add(existing.id);
           if (existing.platform === 'github' && s.config) {
-            await db.updateSource(existing.id, { config: { ...(existing.config || {}), ...cleanSourceConfig('github', s.config) } });
+            const nc = cleanSourceConfig('github', s.config);
+            const patch = { config: { ...(existing.config || {}), ...nc } };
+            // Webhook型 → 従来のリリース通知に切り替えたときは、過去のリリースを一度に通知しないよう「既読」から始め直す
+            if (nc.mode === 'release' && existing.config?.mode !== 'release') patch.primed = false;
+            await db.updateSource(existing.id, patch);
           }
           continue;
         }
@@ -284,9 +349,10 @@ guild.put(
           keep.add(dup.id);
           continue;
         }
-        const row = await db.addSource({ project_id: p.id, ...r, primed: r.platform === 'github' });
+        const polled = isPolledSource(r);
+        const row = await db.addSource({ project_id: p.id, ...r, primed: !polled });
         keep.add(row.id);
-        if (r.platform !== 'github') await primeSource(row).catch(() => {});
+        if (polled) await primeSource(row).catch(() => {});
       }
       for (const s of p.sources) if (!keep.has(s.id)) await db.deleteSource(s.id);
     }
@@ -304,56 +370,77 @@ guild.delete(
   }),
 );
 
-// テスト送信: 更新がなくても、今の設定でサンプル/最新の内容を通知チャンネルに送る(メンションなし)
+// GitHub Webhook の Secret を作り直す(漏れた可能性があるとき用)。GitHub側の設定も更新が必要。
+guild.post(
+  '/projects/:pid/sources/:sid/rotate-secret',
+  wrap(async (req, res) => {
+    const p = await ownedProject(req.params.gid, req.params.pid);
+    const s = p.sources.find((x) => x.id === req.params.sid && x.platform === 'github');
+    if (!s) throw bad('通知元が見つかりません', 404);
+    const secret = crypto.randomBytes(24).toString('hex');
+    await db.updateSource(s.id, { config: { ...(s.config || {}), webhook_secret: secret } });
+    res.json({ webhook: { url: `${publicUrl()}/webhooks/github/${s.id}`, secret } });
+  }),
+);
+
+// テスト送信: 見た目の確認用。「テスト送信」と明記し、メンションは付けない。GitHub(Webhook型)はサンプルの内容を送る。
 guild.post(
   '/projects/:pid/test',
+  sendLimit,
   wrap(async (req, res) => {
     const p = await ownedProject(req.params.gid, req.params.pid);
     const meta = await guildMeta(req.params.gid);
     const override = req.body && Object.keys(req.body).length ? cleanInput(req.body, meta, true) : {};
     const project = { ...p, ...override };
 
-    const newest = [];
     const messages = [];
-    for (const s of p.sources) {
-      if (s.platform === 'github') {
-        // GitHubはWebhook型なので、選んだイベントのサンプルを送る(先頭の1種類)
-        const ev = (s.config?.events || DEFAULT_GH_EVENTS)[0];
-        const msg = buildGithubMessage(project, s, ev, samplePayload(ev, s.external_id), { test: true });
-        if (msg) messages.push(msg);
-        continue;
-      }
-      try {
-        const { candidates, load } = await platforms[s.platform].fetchRecent(s.external_id);
-        const rels = await load(candidates);
-        rels.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-        if (rels[0]) newest.push(rels[0]);
-      } catch (e) {
-        throw bad(`${s.platform} から取得できませんでした: ${e.message}`, 502);
-      }
+    for (const s of p.sources.filter((x) => !isPolledSource(x))) {
+      const ev = (s.config?.events || DEFAULT_GH_EVENTS)[0];
+      const msg = buildGithubMessage(project, s, ev, samplePayload(ev, s.external_id), { test: true });
+      if (msg) messages.push(msg);
     }
-    const groups = project.merge_platforms && newest.length ? [newest] : newest.map((r) => [r]);
-    try {
-      for (const g of groups) {
-        for (const r of g) await platforms[r.platform].hydrate(r);
-        messages.push(buildMessage(project, g, { test: true }));
-      }
-    } catch (e) {
-      throw bad(explainSendError(e), 502);
-    }
-    if (!messages.length) throw bad('送信できる内容がありません');
-    try {
-      for (const m of messages) await sendToChannel(project.channel_id, m);
-    } catch (e) {
-      throw bad(explainSendError(e), 502);
-    }
+    messages.push(...(await buildPolledMessages(project, await newestReleases(p), { test: true })));
+    await deliver(project, messages);
     res.json({ ok: true, sent: messages.length });
   }),
 );
 
-// 今すぐチェック
+// 最新の情報を送る: 保存済みの設定で、実際の最新バージョン(GitHubは最新のリリースとコミット)を通常の通知として送る。
+// body.mentions が true のときだけメンションも付ける。
+guild.post(
+  '/projects/:pid/send-latest',
+  sendLimit,
+  wrap(async (req, res) => {
+    const project = await ownedProject(req.params.gid, req.params.pid);
+    const withMentions = req.body?.mentions === true;
+
+    const messages = [];
+    for (const s of project.sources.filter((x) => !isPolledSource(x))) {
+      let items;
+      try {
+        items = await ghLatestPayloads(s.external_id, s.config?.events || DEFAULT_GH_EVENTS);
+      } catch (e) {
+        throw bad(`GitHubから取得できませんでした(${s.external_id}): ${e.message}`, 502);
+      }
+      // 最新の情報は、通知する内容・ブランチの絞り込みに関係なくそのまま送る
+      const all = { ...s, config: { ...(s.config || {}), events: [...GH_EVENTS], branches: [] } };
+      for (const it of items) {
+        const msg = buildGithubMessage(project, all, it.event, it.payload);
+        if (msg) messages.push(msg);
+      }
+    }
+    messages.push(...(await buildPolledMessages(project, await newestReleases(project), {})));
+    const final = withMentions ? messages : messages.map((m) => ({ ...m, content: undefined, allowedMentions: { parse: [] } }));
+    await deliver(project, final);
+    await db.updateProject(project.id, { last_sent_at: new Date().toISOString(), last_error: null });
+    res.json({ ok: true, sent: final.length });
+  }),
+);
+
+// 今すぐチェック(新しい更新があれば通常どおり通知する)
 guild.post(
   '/projects/:pid/check',
+  sendLimit,
   wrap(async (req, res) => {
     const p = await ownedProject(req.params.gid, req.params.pid);
     res.json(await processProject(p));
@@ -362,5 +449,6 @@ guild.post(
 
 apiRouter.use((err, req, res, next) => {
   if (!err.expose) console.error('[api]', req.method, req.path, err.message);
-  res.status(err.expose ? err.status || 400 : 500).json({ error: err.expose ? err.message : 'サーバー内部エラーが発生しました' });
+  const status = err.expose ? err.status || 400 : err.status >= 400 && err.status < 500 ? err.status : 500;
+  res.status(status).json({ error: err.expose ? err.message : status === 500 ? 'サーバー内部エラーが発生しました' : '入力内容を処理できませんでした' });
 });

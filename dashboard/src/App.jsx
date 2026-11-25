@@ -16,6 +16,7 @@ import {
 } from './lib.js';
 import { Toaster, toast, Switch, Spinner, GuildIcon, PlatformBadge, Modal, fmtRelative } from './ui.jsx';
 
+import SendLatestModal from './SendLatest.jsx';
 const Editor = lazy(() => import('./Editor.jsx'));
 const APP_NAME = '更新おしらせボット';
 
@@ -281,6 +282,7 @@ function ProjectList({ gid }) {
 function ProjectCard({ gid, p, channels, onChanged }) {
   const [busy, setBusy] = useState('');
   const [del, setDel] = useState(false);
+  const [latest, setLatest] = useState(false);
   const ch = channels?.find((c) => c.id === p.channel_id);
   const warn = p.last_error || p.sources.find((s) => s.last_error)?.last_error;
   const run = async (kind, fn, ok) => {
@@ -333,6 +335,9 @@ function ProjectCard({ gid, p, channels, onChanged }) {
         <button className="btn ghost small" onClick={() => go(`/servers/${gid}/edit/${p.id}`)}>
           ✏️ 編集
         </button>
+        <button className="btn ghost small" disabled={!!busy} onClick={() => setLatest(true)}>
+          📤 最新を送信
+        </button>
         <button className="btn ghost small" disabled={!!busy} onClick={() => run('test', () => api(`${base}/test`, { method: 'POST', body: {} }), (r) => `テストメッセージを${r.sent}件送りました`)}>
           {busy === 'test' ? '送信中…' : '🧪 テスト送信'}
         </button>
@@ -344,6 +349,7 @@ function ProjectCard({ gid, p, channels, onChanged }) {
           🗑 削除
         </button>
       </div>
+      {latest && <SendLatestModal gid={gid} p={p} onClose={() => setLatest(false)} onDone={onChanged} />}
       {del && (
         <Modal title={`「${p.name}」を削除しますか？`} onClose={() => setDel(false)}>
           <p className="muted">このプロジェクトの通知は届かなくなります。削除すると元に戻せません。</p>

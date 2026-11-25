@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import SendLatestModal from './SendLatest.jsx';
 import { api, errorMessage, go, useAsync, useDebounced } from './lib.js';
 import { toast, Switch, Chip, Section, Field, Spinner, PlatformBadge, Select, Avatar, CopyButton, fmtNum } from './ui.jsx';
 
@@ -26,20 +27,10 @@ const VTYPES = [
   ['beta', 'ベータ', '🟡'],
   ['alpha', 'アルファ', '🔴'],
 ];
-const GH_EVENTS = [
-  ['push', 'プッシュ(コミット)', '🔨'],
-  ['release', 'リリース公開', '🚀'],
-  ['issues', 'Issue(作成・クローズ)', '🐛'],
-  ['pull_request', 'プルリクエスト', '🟣'],
-  ['issue_comment', 'コメント', '💬'],
-  ['create', 'ブランチ・タグの作成', '🌿'],
-  ['delete', 'ブランチ・タグの削除', '🗑️'],
-  ['fork', 'フォーク', '🍴'],
-  ['star', 'スター', '⭐'],
-  ['workflow_run', 'CIの結果(GitHub Actions)', '✅'],
-];
-const DEFAULT_GH_CONFIG = { events: ['push', 'release'], branches: [] };
+import GithubConfig, { GH_EVENTS, DEFAULT_GH_CONFIG } from './GithubConfig.jsx';
 const MAX_SOURCES = 6;
+// 定期チェックする通知元か(GitHubは「従来のリリース通知」に切り替えたときだけ)
+const isPolled = (s) => s.platform !== 'github' || s.config?.mode === 'release';
 const BASE_DISPLAY = {
   language: 'ja',
   show_changelog: true,
@@ -97,9 +88,10 @@ function projectToForm(p) {
     sources: (p.sources || []).map((s) => ({
       platform: s.platform,
       external_id: s.external_id,
+      id: s.id,
       name: s.display_name,
       iconUrl: s.icon_url,
-      ...(s.platform === 'github' ? { config: { events: [...(s.config?.events || [])], branches: [...(s.config?.branches || [])] }, webhook: s.webhook } : {}),
+      ...(s.platform === 'github' ? { config: { mode: s.config?.mode === 'release' ? 'release' : 'webhook', events: [...(s.config?.events || [])], branches: [...(s.config?.branches || [])] }, webhook: s.webhook } : {}),
     })),
   };
 }
@@ -169,6 +161,7 @@ function EditorForm({ gid, pid, options, meta, project }) {
   const initial = useRef(JSON.stringify(form));
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState('');
+  const [latestOpen, setLatestOpen] = useState(false);
   const [names, setNames] = useState({}); // ユーザーID → { name, avatarUrl }
   const dirty = JSON.stringify(form) !== initial.current;
 
@@ -178,6 +171,16 @@ function EditorForm({ gid, pid, options, meta, project }) {
   };
   const setDisplay = (k, v) => setForm((f) => ({ ...f, display: { ...f.display, [k]: v } }));
   const setFilter = (k, v) => setForm((f) => ({ ...f, filters: { ...f.filters, [k]: v } }));
+  // Secretを作り直したあとの表示更新(保存済みの内容と同じ扱いにして「未保存」にならないようにする)
+  const onWebhook = (src, webhook) => {
+    const patch = (f) => ({ ...f, sources: f.sources.map((x) => (x.platform === src.platform && x.external_id === src.external_id ? { ...x, webhook } : x)) });
+    setForm(patch);
+    try {
+      initial.current = JSON.stringify(patch(JSON.parse(initial.current)));
+    } catch {
+      /* そのまま */
+    }
+  };
 
   // 保存済みのメンション相手の名前とアイコンを取得
   useEffect(() => {
@@ -263,7 +266,7 @@ function EditorForm({ gid, pid, options, meta, project }) {
       <main className="page editor">
         <div className="editor-main">
           <BasicSection form={form} set={set} errors={errors} channels={meta.channels} />
-          <SourcesSection form={form} set={set} error={errors.sources} options={options} saved={!!pid} />
+          <SourcesSection form={form} set={set} error={errors.sources} options={options} saved={!!pid} gid={gid} pid={pid} onWebhook={onWebhook} />
           <MergeSection form={form} set={set} />
           <FiltersSection form={form} setFilter={setFilter} options={options} />
           <MentionsSection form={form} set={set} meta={meta} gid={gid} names={names} setNames={setNames} />
@@ -279,6 +282,9 @@ function EditorForm({ gid, pid, options, meta, project }) {
         </button>
         <span className="spacer" />
         {dirty && <span className="muted small">未保存の変更があります</span>}
+        <button className="btn" onClick={() => setLatestOpen(true)} disabled={!pid || busy !== '' || dirty} title={!pid ? '先に保存すると送信できます' : dirty ? '先に保存してください(保存済みの設定で送ります)' : ''}>
+          📤 最新を送信
+        </button>
         <button className="btn" onClick={sendTest} disabled={!pid || busy !== ''} title={pid ? '' : '先に保存するとテスト送信できます'}>
           {busy === 'test' ? '送信中…' : '🧪 テスト送信'}
         </button>
@@ -286,6 +292,7 @@ function EditorForm({ gid, pid, options, meta, project }) {
           {busy === 'save' ? '保存中…' : '保存'}
         </button>
       </div>
+      {latestOpen && <SendLatestModal gid={gid} p={{ id: pid, name: form.name }} onClose={() => setLatestOpen(false)} />}
       {!pid && <p className="muted small center nopad">※ テスト送信は、一度保存したあとで使えます。</p>}
     </>
   );
@@ -350,7 +357,7 @@ function BasicSection({ form, set, errors, channels }) {
 }
 
 /* ================= 通知元 ================= */
-function SourcesSection({ form, set, error, saved }) {
+function SourcesSection({ form, set, error, saved, gid, pid, onWebhook }) {
   const [platform, setPlatform] = useState('modrinth');
   const [type, setType] = useState('mod');
   // 検索欄はサイトごとに別々に持つ(追加したらその欄だけ空にする)
@@ -380,7 +387,7 @@ function SourcesSection({ form, set, error, saved }) {
     if (form.sources.length >= MAX_SOURCES) return toast(`通知元は最大${MAX_SOURCES}個までです`, 'error');
     if (has(it)) return;
     const src = { platform: it.platform, external_id: it.id, name: it.name, iconUrl: it.iconUrl };
-    if (it.platform === 'github') src.config = { events: [...DEFAULT_GH_CONFIG.events], branches: [] };
+    if (it.platform === 'github') src.config = { ...DEFAULT_GH_CONFIG, events: [...DEFAULT_GH_CONFIG.events], branches: [] };
     set('sources', [...form.sources, src]);
     setQ('');
   }
@@ -414,7 +421,7 @@ function SourcesSection({ form, set, error, saved }) {
                 ×
               </button>
             </div>
-            {s.platform === 'github' && <GithubConfig s={s} onChange={(patch) => updateSource(s, patch)} saved={saved} />}
+            {s.platform === 'github' && <GithubConfig s={s} onChange={(patch) => updateSource(s, patch)} saved={saved} gid={gid} pid={pid} onWebhook={onWebhook} />}
           </div>
         ))}
       </div>
@@ -457,100 +464,11 @@ function SourcesSection({ form, set, error, saved }) {
   );
 }
 
-/* ---- GitHub通知元の設定(どのイベントを通知するか + Webhookの設定値) ---- */
-function GithubConfig({ s, onChange, saved }) {
-  const cfg = s.config || DEFAULT_GH_CONFIG;
-  const [bq, setBq] = useState('');
-  const toggle = (ev) => onChange({ config: { ...cfg, events: cfg.events.includes(ev) ? cfg.events.filter((x) => x !== ev) : [...cfg.events, ev] } });
-  const addBranch = () => {
-    const v = bq.trim();
-    if (v && !cfg.branches.includes(v)) onChange({ config: { ...cfg, branches: [...cfg.branches, v] } });
-    setBq('');
-  };
-  return (
-    <div className="ghbox">
-      <div className="flabel">通知する内容</div>
-      <div className="evgrid">
-        {GH_EVENTS.map(([id, label, emoji]) => (
-          <label key={id} className={'evopt' + (cfg.events.includes(id) ? ' on' : '')}>
-            <input type="checkbox" checked={cfg.events.includes(id)} onChange={() => toggle(id)} />
-            <span>
-              {emoji} {label}
-            </span>
-          </label>
-        ))}
-      </div>
-      <div className="flabel">ブランチを絞る(任意)</div>
-      <div className="chips">
-        {cfg.branches.map((b) => (
-          <span key={b} className="rchip">
-            {b}
-            <button type="button" aria-label={`${b}を外す`} onClick={() => onChange({ config: { ...cfg, branches: cfg.branches.filter((x) => x !== b) } })}>
-              ×
-            </button>
-          </span>
-        ))}
-        {cfg.branches.length === 0 && <span className="muted small">すべてのブランチ</span>}
-      </div>
-      <div className="row">
-        <input
-          className="grow"
-          value={bq}
-          onChange={(e) => setBq(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              addBranch();
-            }
-          }}
-          placeholder="例: main や release/* (入力して Enter)"
-        />
-        <button type="button" className="btn small" onClick={addBranch} disabled={!bq.trim()}>
-          追加
-        </button>
-      </div>
-      <p className="hint">プッシュ・CI・ブランチ作成/削除の通知に使われます。</p>
-
-      <div className="webhook">
-        <div className="flabel">GitHub側の設定(Webhook)</div>
-        {s.webhook?.secret ? (
-          <>
-            <p className="hint">GitHubのリポジトリで <b>Settings → Webhooks → Add webhook</b> を開き、次のとおり入力します。</p>
-            <CopyRow label="Payload URL" value={s.webhook.url} />
-            <div className="copyrow">
-              <span className="clabel">Content type</span>
-              <code>application/json</code>
-            </div>
-            <CopyRow label="Secret" value={s.webhook.secret} />
-            <div className="copyrow">
-              <span className="clabel">イベント</span>
-              <span className="small">「Send me everything」を選べばOK(ボットが上で選んだものだけ通知します)</span>
-            </div>
-            <p className="hint">入力して「Add webhook」を押すと、GitHubが確認のメッセージを送ります。リポジトリの管理者権限が必要です。</p>
-          </>
-        ) : (
-          <p className="hint">{saved ? '保存すると、Webhookの設定値が表示されます。' : '保存すると、GitHubに入力するWebhookの設定値(URLとSecret)が表示されます。'}</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CopyRow({ label, value }) {
-  return (
-    <div className="copyrow">
-      <span className="clabel">{label}</span>
-      <input readOnly className="mono grow" value={value} onFocus={(e) => e.target.select()} />
-      <CopyButton text={value} />
-    </div>
-  );
-}
-
 /* ================= まとめ表示 ================= */
 function MergeSection({ form, set }) {
-  const platCount = new Set(form.sources.filter((s) => s.platform !== 'github').map((s) => s.platform)).size;
+  const platCount = new Set(form.sources.filter(isPolled).map((s) => s.platform)).size;
   return (
-    <Section id="merge" icon="🧩" title="まとめ表示" desc="ModrinthとCurseForgeの通知を1つのメッセージにまとめます。(GitHubの通知はまとめず、別のメッセージで届きます)">
+    <Section id="merge" icon="🧩" title="まとめ表示" desc="ModrinthとCurseForgeの通知を1つのメッセージにまとめます。(GitHubは、通知の方法が「リリースのバージョンを通知」のときだけまとめられます)">
       <div className="switchrow">
         <div>
           <strong>複数サイトの通知を1つにまとめる</strong>
@@ -572,7 +490,7 @@ function FiltersSection({ form, setFilter, options }) {
   const [vq, setVq] = useState('');
   const [snap, setSnap] = useState(false);
   const f = form.filters;
-  const onlyGithub = form.sources.length > 0 && form.sources.every((s) => s.platform === 'github');
+  const onlyGithub = form.sources.length > 0 && form.sources.every((s) => !isPolled(s));
   const toggle = (key, val) => setFilter(key, f[key].includes(val) ? f[key].filter((x) => x !== val) : [...f[key], val]);
   const all = useMemo(() => (snap ? [...options.gameVersions, ...options.snapshots] : options.gameVersions), [options, snap]);
   const list = all.filter((v) => v.toLowerCase().includes(vq.trim().toLowerCase())).slice(0, 80);
@@ -881,8 +799,8 @@ function MentionLine({ form, roleById, names }) {
 function Preview({ form, meta, names }) {
   const d = form.display;
   const t = L[d.language === 'en' ? 'en' : 'ja'];
-  const packSources = form.sources.filter((s) => s.platform !== 'github');
-  const ghSources = form.sources.filter((s) => s.platform === 'github');
+  const packSources = form.sources.filter(isPolled);
+  const ghSources = form.sources.filter((s) => !isPolled(s));
   const showPack = packSources.length > 0 || ghSources.length === 0;
   const plats = [...new Set(packSources.map((s) => s.platform))];
   const shown = plats.length ? plats : ['modrinth', 'curseforge'];

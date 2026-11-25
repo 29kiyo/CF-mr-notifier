@@ -41,3 +41,11 @@
 .embed.gh { padding-right: .8rem; }
 .eauthor { display: flex; align-items: center; gap: .4rem; font-size: .8rem; font-weight: 700; margin-bottom: .25rem; }
 .eauthor img { width: 20px; height: 20px; border-radius: 50%; }
+
+/* ---- GitHubの通知の方法(切り替え) ---- */
+.modegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .5rem; }
+.modeopt { display: flex; align-items: flex-start; gap: .6rem; background: rgba(0, 0, 0, .2); border: 1px solid transparent; border-radius: 8px; padding: .6rem .8rem; cursor: pointer; }
+.modeopt.on { border-color: var(--primary); background: rgba(88, 101, 242, .18); }
+.modeopt input { width: auto; margin-top: .2rem; accent-color: var(--primary); }
+.modeopt > span { display: flex; flex-direction: column; gap: .15rem; }
+.ghbox .ghbox { margin: 0; padding: 0; border: 0; background: none; }

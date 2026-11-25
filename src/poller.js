@@ -1,4 +1,4 @@
-import { platforms } from './platforms.js';
+import { platforms, isPolledSource } from './platforms.js';
 import * as db from './db.js';
 import { buildMessage } from './embed.js';
 import { sendToChannel, explainSendError } from './bot.js';
@@ -62,7 +62,7 @@ export async function processProject(project) {
   const fresh = [];
   const now = () => new Date().toISOString();
 
-  for (const s of project.sources.filter((x) => x.platform !== 'github')) {
+  for (const s of project.sources.filter(isPolledSource)) {
     try {
       const { info, ids, load } = await platforms[s.platform].fetchRecent(s.external_id);
       if (!s.primed) {
@@ -108,7 +108,7 @@ export async function processProject(project) {
 
   // まとめ表示: 片方のプラットフォームが遅れて公開されることがあるので、少しだけ待つ
   if (project.merge_platforms) {
-    const platformCount = new Set(project.sources.filter((x) => x.platform !== 'github').map((s) => s.platform)).size;
+    const platformCount = new Set(project.sources.filter(isPolledSource).map((s) => s.platform)).size;
     const waitMs = (project.merge_wait_minutes ?? 15) * 60 * 1000;
     if (platformCount > 1 && waitMs > 0) {
       groups = groups.filter((g) => {

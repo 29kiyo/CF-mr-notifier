@@ -33,6 +33,7 @@ webhookRouter.post('/github/:sid', express.raw({ type: '*/*', limit: '2mb' }), a
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'invalid signature' });
 
   const event = String(req.get('x-github-event') || '');
+  if (src.config?.mode === 'release' && String(req.get('x-github-event')) !== 'ping') return res.json({ ok: true, ignored: 'release mode' });
   if (event === 'ping') return res.json({ ok: true, pong: true });
 
   const delivery = req.get('x-github-delivery');

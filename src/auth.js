@@ -9,6 +9,14 @@ const SECRET = () => process.env.SESSION_SECRET;
 // ログインの保持期間。毎回ログインしなくて済むよう長めにしている。
 // (サーバー管理権限は、操作のたびにDiscordで最新の状態を確認しているので、期間が長くても安全)
 const SESSION_DAYS = 30;
+const JWT_OPTS = { algorithms: ['HS256'] };
+
+// ログイン開始時のブラウザと、Discordから戻ってきたブラウザが同じか確認するための目印(ログインの乗っ取り対策)
+const NONCE_COOKIE = 'oauth_nonce';
+function readCookie(req, name) {
+  const m = String(req.headers.cookie || '').split(/;\s*/).find((c) => c.startsWith(name + '='));
+  return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
+}
 
 export const authRouter = express.Router();
 
@@ -25,7 +33,9 @@ function okReturn(u) {
 authRouter.get('/login', (req, res) => {
   const ret = okReturn(req.query.return) || (allowedOrigins[0] ? new URL(allowedOrigins[0]) : null);
   if (!ret) return res.status(500).send('DASHBOARD_ORIGINS が未設定です');
-  const state = jwt.sign({ ret: ret.toString(), n: crypto.randomUUID() }, SECRET(), { expiresIn: '10m' });
+  const nonce = crypto.randomUUID();
+  res.cookie(NONCE_COOKIE, nonce, { httpOnly: true, secure: publicUrl().startsWith('https://'), sameSite: 'lax', maxAge: 10 * 60 * 1000, path: '/auth' });
+  const state = jwt.sign({ ret: ret.toString(), n: nonce }, SECRET(), { expiresIn: '10m' });
   const p = new URLSearchParams({
     client_id: process.env.DISCORD_CLIENT_ID,
     response_type: 'code',
@@ -40,8 +50,10 @@ authRouter.get('/login', (req, res) => {
 authRouter.get('/callback', async (req, res) => {
   let ret;
   try {
-    const st = jwt.verify(String(req.query.state || ''), SECRET());
+    const st = jwt.verify(String(req.query.state || ''), SECRET(), JWT_OPTS);
+    if (!st.n || readCookie(req, NONCE_COOKIE) !== st.n) throw new Error('nonce mismatch');
     ret = new URL(st.ret);
+    res.clearCookie(NONCE_COOKIE, { path: '/auth' });
   } catch {
     return res.status(400).send('ログインの有効期限が切れました。もう一度ログインしてください。');
   }
@@ -101,7 +113,7 @@ export function requireAuth(req, res, next) {
   const t = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!t) return res.status(401).json({ error: 'ログインが必要です' });
   try {
-    req.user = jwt.verify(t, SECRET());
+    req.user = jwt.verify(t, SECRET(), JWT_OPTS);
     next();
   } catch {
     res.status(401).json({ error: 'ログインの有効期限が切れました', code: 'session_expired' });
