@@ -49,3 +49,6 @@
 .modeopt input { width: auto; margin-top: .2rem; accent-color: var(--primary); }
 .modeopt > span { display: flex; flex-direction: column; gap: .15rem; }
 .ghbox .ghbox { margin: 0; padding: 0; border: 0; background: none; }
+
+/* ---- 絞り込み: 作品に合わせた候補の案内 ---- */
+.relnote { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; background: rgba(88, 101, 242, .12); border: 1px solid rgba(88, 101, 242, .35); border-radius: 8px; padding: .5rem .8rem; font-size: .85rem; }

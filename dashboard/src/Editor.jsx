@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import SendLatestModal from './SendLatest.jsx';
+import FiltersSection from './Filters.jsx';
 import { api, errorMessage, go, useAsync, useDebounced } from './lib.js';
 import { toast, Switch, Chip, Section, Field, Spinner, PlatformBadge, Select, Avatar, CopyButton, fmtNum } from './ui.jsx';
 
@@ -503,90 +504,6 @@ function MergeSection({ form, set }) {
 }
 
 /* ================= 絞り込み ================= */
-function FiltersSection({ form, setFilter, options }) {
-  const [vq, setVq] = useState('');
-  const [snap, setSnap] = useState(false);
-  const f = form.filters;
-  const onlyGithub = form.sources.length > 0 && form.sources.every((s) => !isPolled(s));
-  const toggle = (key, val) => setFilter(key, f[key].includes(val) ? f[key].filter((x) => x !== val) : [...f[key], val]);
-  const all = useMemo(() => (snap ? [...options.gameVersions, ...options.snapshots] : options.gameVersions), [options, snap]);
-  const list = all.filter((v) => v.toLowerCase().includes(vq.trim().toLowerCase())).slice(0, 80);
-  const custom = vq.trim();
-  const canAddCustom = custom && !f.game_versions.includes(custom) && !all.includes(custom);
-
-  return (
-    <Section id="filters" icon="🎯" title="絞り込み" desc={onlyGithub ? 'この絞り込みはModrinth・CurseForgeの通知用です(GitHubのブランチ指定は「通知元」で設定します)。' : '条件に合わない更新は通知されません。何も選ばなければ、すべて通知します。(Modrinth・CurseForge用)'}>
-      <Field label="ゲームのバージョン" hint="例: 1.21.4。「1.21.*」のように * を使うと 1.21 系をまとめて指定できます(入力して Enter)。">
-        <div className="chips">
-          {f.game_versions.map((v) => (
-            <span key={v} className="rchip">
-              {v}
-              <button type="button" aria-label={`${v}を外す`} onClick={() => toggle('game_versions', v)}>
-                ×
-              </button>
-            </span>
-          ))}
-          {f.game_versions.length === 0 && <span className="muted small">すべてのバージョン</span>}
-        </div>
-        <input
-          value={vq}
-          onChange={(e) => setVq(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && canAddCustom) {
-              e.preventDefault();
-              toggle('game_versions', custom);
-              setVq('');
-            }
-          }}
-          placeholder="バージョンを検索 / 入力して Enter で追加"
-        />
-        <label className="check">
-          <input type="checkbox" checked={snap} onChange={(e) => setSnap(e.target.checked)} /> スナップショットも表示する
-        </label>
-        <div className="verlist" role="group" aria-label="バージョン一覧">
-          {canAddCustom && (
-            <button
-              type="button"
-              className="ver add"
-              onClick={() => {
-                toggle('game_versions', custom);
-                setVq('');
-              }}
-            >
-              「{custom}」を追加
-            </button>
-          )}
-          {list.map((v) => (
-            <button key={v} type="button" aria-pressed={f.game_versions.includes(v)} className={'ver' + (f.game_versions.includes(v) ? ' sel' : '')} onClick={() => toggle('game_versions', v)}>
-              {v}
-            </button>
-          ))}
-        </div>
-      </Field>
-
-      <Field label="ローダー" hint="選んだローダー向けの更新だけを通知します。">
-        <div className="chips">
-          {[...new Set([...options.loaders.map((l) => l.name), ...f.loaders])].map((name) => (
-            <Chip key={name} selected={f.loaders.includes(name)} onClick={() => toggle('loaders', name)}>
-              {loaderLabel(name)}
-            </Chip>
-          ))}
-        </div>
-      </Field>
-
-      <Field label="バージョンタイプ" hint="リリース=正式版 / ベータ=テスト版 / アルファ=開発中の版。リリースだけにすると、テスト版の通知を減らせます。">
-        <div className="chips">
-          {VTYPES.map(([id, label, emoji]) => (
-            <Chip key={id} selected={f.version_types.includes(id)} onClick={() => toggle('version_types', id)}>
-              {emoji} {label}
-            </Chip>
-          ))}
-        </div>
-      </Field>
-    </Section>
-  );
-}
-
 /* ================= メンション ================= */
 function MentionsSection({ form, set, meta, gid, names, setNames }) {
   const [rq, setRq] = useState('');

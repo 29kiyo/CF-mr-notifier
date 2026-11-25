@@ -261,6 +261,37 @@ apiRouter.get(
   }),
 );
 
+// 追加した作品(Modrinth / CurseForge)が対応しているローダー・ゲームバージョンの一覧(絞り込みの候補用)
+apiRouter.post(
+  '/sources/options',
+  searchLimit,
+  wrap(async (req, res) => {
+    const list = (Array.isArray(req.body?.sources) ? req.body.sources : []).slice(0, MAX_SOURCES);
+    const loaders = new Set();
+    const versions = new Set();
+    let known = 0;
+    await Promise.all(
+      list.map(async (s) => {
+        if (!s || !['modrinth', 'curseforge'].includes(s.platform)) return;
+        const id = String(s.external_id || '').slice(0, 200);
+        if (!id) return;
+        try {
+          const o = await platforms[s.platform].fetchOptions(id);
+          known++;
+          o.loaders.forEach((l) => loaders.add(String(l).toLowerCase()));
+          o.gameVersions.forEach((v) => versions.add(String(v)));
+        } catch {
+          /* 取得できなかった作品は無視する */
+        }
+      }),
+    );
+    const all = await getOptions();
+    const order = new Map([...all.gameVersions, ...all.snapshots].map((v, i) => [v, i]));
+    const gameVersions = [...versions].sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || b.localeCompare(a));
+    res.json({ known: known > 0, loaders: [...loaders], gameVersions });
+  }),
+);
+
 const guild = express.Router({ mergeParams: true });
 apiRouter.use('/guilds/:gid', requireGuild, guild);
 

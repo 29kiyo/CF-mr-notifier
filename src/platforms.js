@@ -349,9 +349,24 @@ async function ghRecent(id) {
 }
 
 /* ------------------------------------------------------------------ */
+// 作品が対応しているローダー・ゲームバージョン(ダッシュボードの絞り込み候補用)
+async function mrOptions(id) {
+  return memo(`mropt:${id}`, 10 * 60 * 1000, async () => {
+    const p = await http(`${MR}/project/${enc(id)}`);
+    return { loaders: p.loaders || [], gameVersions: p.game_versions || [] };
+  });
+}
+async function cfOptions(id) {
+  return memo(`cfopt:${id}`, 10 * 60 * 1000, async () => {
+    const r = await cf(`/mods/${enc(id)}`);
+    const idx = r.data.latestFilesIndexes || [];
+    return { loaders: cfLoaders(r.data), gameVersions: [...new Set(idx.map((i) => i.gameVersion).filter(Boolean))] };
+  });
+}
+
 export const platforms = {
-  modrinth: { search: mrSearch, fetchInfo: mrFetchInfo, fetchRecent: mrRecent, hydrate: mrHydrate },
-  curseforge: { search: cfSearch, fetchInfo: cfFetchInfo, fetchRecent: cfRecent, hydrate: cfHydrate },
+  modrinth: { search: mrSearch, fetchInfo: mrFetchInfo, fetchRecent: mrRecent, hydrate: mrHydrate, fetchOptions: mrOptions },
+  curseforge: { search: cfSearch, fetchInfo: cfFetchInfo, fetchRecent: cfRecent, hydrate: cfHydrate, fetchOptions: cfOptions },
   github: { search: ghSearch, fetchInfo: ghFetchInfo, fetchRecent: ghRecent, hydrate: async () => {} },
 };
 
