@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 dist/
 .env.example
+out.txt
+err.txt
+_*.mjs
+_patches.json
