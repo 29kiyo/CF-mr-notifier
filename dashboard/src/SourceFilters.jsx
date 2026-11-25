@@ -93,7 +93,7 @@ export default function SourceFilters({ s, onChange, globalFilters, options }) {
                 setVq('');
               }
             }}
-            placeholder="バージョンを検索 / 「1.21.*」のように入力して Enter で追加"
+            placeholder="バージョンを検索 / 「26.1.x」のように入力して Enter で追加"
           />
           <div className="verlist" role="group" aria-label={`${s.name || s.external_id}のバージョン一覧`}>
             {canAddCustom && (

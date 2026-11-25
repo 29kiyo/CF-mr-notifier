@@ -56,3 +56,13 @@
 /* ---- 作品ごとのローダー・バージョン指定 ---- */
 .srcfilter { margin-left: .6rem; padding-left: .8rem; border-left: 3px solid rgba(88, 101, 242, .45); display: flex; flex-direction: column; gap: .6rem; }
 .srcfilter-body { display: flex; flex-direction: column; gap: .6rem; padding: .2rem 0 .4rem; }
+
+/* ---- 追加した作品: クリックで詳細を開く ---- */
+.src { padding: 0 .6rem 0 0; }
+.src-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: .6rem; background: none; border: 0; padding: .5rem .6rem; text-align: left; color: inherit; cursor: pointer; border-radius: 8px; }
+.src-main:hover { background: rgba(255, 255, 255, .05); }
+.src-main .src-name { flex: 1; }
+.src-chev { color: var(--muted); font-size: .9rem; width: .9rem; transition: transform .15s; display: inline-block; }
+.srcwrap.open .src-chev { transform: rotate(90deg); color: var(--text); }
+.srcwrap.open > .src { background: rgba(88, 101, 242, .14); }
+.ownpill { font-size: .68rem; font-weight: 700; border-radius: 99px; padding: .1rem .55rem; color: #c9cdfb; background: rgba(88, 101, 242, .3); white-space: nowrap; }

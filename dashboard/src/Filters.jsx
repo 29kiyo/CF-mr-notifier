@@ -65,7 +65,7 @@ export default function FiltersSection({ form, setFilter, options }) {
 
   // 選択中だが、追加した作品が対応していないもの
   const stale = narrowed
-    ? [...f.loaders.filter((l) => !rel.loaders.includes(l)).map(loaderLabel), ...f.game_versions.filter((v) => !v.includes('*') && !relVersionSet.has(v))]
+    ? [...f.loaders.filter((l) => !rel.loaders.includes(l)).map(loaderLabel), ...f.game_versions.filter((v) => !/\.[*xX]$/.test(v) && !relVersionSet.has(v))]
     : [];
 
   return (
@@ -95,7 +95,7 @@ export default function FiltersSection({ form, setFilter, options }) {
         </p>
       )}
 
-      <Field label="ゲームのバージョン" hint="例: 1.21.4。「1.21.*」のように * を使うと 1.21 系をまとめて指定できます(入力して Enter)。">
+      <Field label="ゲームのバージョン" hint="例: 1.21.4。「26.1.x」や「1.21.*」のように書くと、その系統(26.1.1・26.1.2 など)をまとめて指定でき、通知にも同じ書き方で表示されます(入力して Enter)。">
         <div className="chips">
           {f.game_versions.map((v) => (
             <span key={v} className="rchip">

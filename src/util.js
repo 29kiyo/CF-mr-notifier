@@ -83,7 +83,9 @@ export function colorFromString(s) {
 
 // ゲームバージョンの指定(例: "1.21.4" / "1.21.*")に一致するか
 export function matchVersion(v, g) {
-  if (g.endsWith('.*')) return v === g.slice(0, -2) || v.startsWith(g.slice(0, -1));
+  // 「1.21.*」「26.1.x」のような書き方は、その系統(1.21 / 1.21.1 / 1.21.2 ...)をまとめて指定する
+  const m = /^(.*)\.[*xX]$/.exec(g);
+  if (m) return v === m[1] || v.startsWith(m[1] + '.');
   return v === g;
 }
 // 作品(通知元)ごとの個別指定があればそれを使い、なければプロジェクト全体の絞り込みを使う

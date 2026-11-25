@@ -374,6 +374,18 @@ function SourcesSection({ form, set, error, saved, gid, pid, onWebhook, options 
   const setQ = (v) => setQs((s) => ({ ...s, [platform]: v }));
   const dq = useDebounced(q, 450);
   const [res, setRes] = useState({ loading: false, items: [], error: null });
+  // クリックで開いている通知元(詳細設定の表示/非表示)
+  const [open, setOpen] = useState(() => new Set());
+  const skey = (s) => s.platform + s.external_id;
+  const isOpen = (s) => open.has(skey(s));
+  const toggleOpen = (s) =>
+    setOpen((o) => {
+      const n = new Set(o);
+      if (n.has(skey(s))) n.delete(skey(s));
+      else n.add(skey(s));
+      return n;
+    });
+  const hasOwn = (s) => !!(s.config?.filters && (s.config.filters.loaders?.length || s.config.filters.game_versions?.length));
 
   useEffect(() => {
     let dead = false;
@@ -398,6 +410,7 @@ function SourcesSection({ form, set, error, saved, gid, pid, onWebhook, options 
     if (it.platform !== 'github') src.config = { filters: { loaders: [], game_versions: [] } };
     if (it.platform === 'github') src.config = { ...DEFAULT_GH_CONFIG, events: [...DEFAULT_GH_CONFIG.events], branches: [] };
     set('sources', [...form.sources, src]);
+    if (it.platform === 'github') setOpen((o) => new Set(o).add(skey(src)));
     setQ('');
   }
   const updateSource = (target, patch) => set('sources', form.sources.map((s) => (s === target ? { ...s, ...patch } : s)));
@@ -421,21 +434,29 @@ function SourcesSection({ form, set, error, saved, gid, pid, onWebhook, options 
       <div className="chosen">
         {form.sources.length === 0 && <p className="muted small">まだ追加されていません</p>}
         {form.sources.map((s) => (
-          <div key={s.platform + s.external_id} className="srcwrap">
+          <div key={skey(s)} className={'srcwrap' + (isOpen(s) ? ' open' : '')}>
             <div className="src">
-              {s.iconUrl ? <img src={s.iconUrl} alt="" /> : <span className="src-ph" />}
-              <span className="src-name">{s.name || s.external_id}</span>
+              <button type="button" className="src-main" aria-expanded={isOpen(s)} title="クリックして詳細設定を開く" onClick={() => toggleOpen(s)}>
+                <span className="src-chev" aria-hidden>
+                  ▸
+                </span>
+                {s.iconUrl ? <img src={s.iconUrl} alt="" /> : <span className="src-ph" />}
+                <span className="src-name">{s.name || s.external_id}</span>
+              </button>
+              {hasOwn(s) && <span className="ownpill">個別指定あり</span>}
+              {s.platform === 'github' && <span className="ownpill">{s.config?.mode === 'release' ? 'リリース通知' : 'Webhook'}</span>}
               <PlatformBadge platform={s.platform} />
               <button type="button" className="x" aria-label={`${s.name}を外す`} onClick={() => set('sources', form.sources.filter((x) => x !== s))}>
                 ×
               </button>
             </div>
-            {s.platform !== 'github' && <SourceFilters s={s} onChange={(patch) => updateSource(s, patch)} globalFilters={form.filters} options={options} />}
-            {s.platform === 'github' && <GithubConfig s={s} onChange={(patch) => updateSource(s, patch)} saved={saved} gid={gid} pid={pid} onWebhook={onWebhook} />}
+            {isOpen(s) && s.platform !== 'github' && <SourceFilters s={s} onChange={(patch) => updateSource(s, patch)} globalFilters={form.filters} options={options} />}
+            {isOpen(s) && s.platform === 'github' && <GithubConfig s={s} onChange={(patch) => updateSource(s, patch)} saved={saved} gid={gid} pid={pid} onWebhook={onWebhook} />}
           </div>
         ))}
       </div>
 
+      {form.sources.length > 0 && <p className="hint">▸ 追加した作品をクリックすると、詳細設定(ローダー・バージョンの個別指定など)が開きます。</p>}
       <div className="tabs" role="tablist">
         {PLATFORMS.map(([id, label]) => (
           <button key={id} role="tab" aria-selected={platform === id} className={'tab' + (platform === id ? ' on' : '')} onClick={() => setPlatform(id)}>

@@ -72,9 +72,10 @@ const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const fmtLoader = (l) => ({ neoforge: 'NeoForge', liteloader: 'LiteLoader', bungeecord: 'BungeeCord', optifine: 'OptiFine' })[l.toLowerCase()] || cap(l);
 const uniq = (a) => [...new Set(a)];
 
+const partNum = (x) => (/^[*xX]$/.test(x) ? 1e6 : parseInt(x, 10) || 0);
 function versionDesc(a, b) {
-  const pa = a.split(/[.\-]/).map((x) => parseInt(x, 10) || 0);
-  const pb = b.split(/[.\-]/).map((x) => parseInt(x, 10) || 0);
+  const pa = a.split(/[.\-]/).map(partNum);
+  const pb = b.split(/[.\-]/).map(partNum);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const d = (pb[i] || 0) - (pa[i] || 0);
     if (d) return d;
@@ -115,7 +116,16 @@ export function buildMessage(project, group, { test = false } = {}) {
   };
   const versionsOf = (r) => {
     const want = eff(r).game_versions || [];
-    return (r.gameVersions || []).filter((v) => !want.length || want.some((g) => matchVersion(v, g)));
+    if (!want.length) return r.gameVersions || [];
+    // 「26.1.x」「1.21.*」のように書いて絞り込んでいるときは、通知にも同じ書き方で表示する
+    const out = [];
+    for (const g of want) {
+      const hit = (r.gameVersions || []).filter((v) => matchVersion(v, g));
+      if (!hit.length) continue;
+      if (/\.[*xX]$/.test(g)) out.push(g);
+      else out.push(...hit);
+    }
+    return out;
   };
 
   const embed = {
