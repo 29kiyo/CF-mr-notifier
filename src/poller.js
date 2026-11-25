@@ -2,14 +2,9 @@ import { platforms, isPolledSource } from './platforms.js';
 import * as db from './db.js';
 import { buildMessage } from './embed.js';
 import { sendToChannel, explainSendError } from './bot.js';
-import { sleep } from './util.js';
+import { sleep, matchVersion } from './util.js';
 
 /* ---------- フィルタ ---------- */
-function matchVersion(v, g) {
-  if (g.endsWith('.*')) return v === g.slice(0, -2) || v.startsWith(g.slice(0, -1));
-  return v === g;
-}
-
 export function passesFilters(rel, f = {}) {
   const gv = f.game_versions || [];
   const ld = (f.loaders || []).map((l) => l.toLowerCase());
@@ -21,19 +16,37 @@ export function passesFilters(rel, f = {}) {
   return true;
 }
 
-/* ---------- Modrinth と CurseForge を1つにまとめる ---------- */
-const norm = (v) => String(v || '').toLowerCase().replace(/^v/, '').replace(/[^a-z0-9.]+/g, '');
-function sameVersion(a, b) {
+/* ---------- 同じバージョンの通知を1つにまとめる ---------- */
+// 別サイト(Modrinth / CurseForge)や、別ローダー・別ファイル(Fabric版 / NeoForge版 など)を同じバージョンとして扱う
+const LOADER_WORDS = /neoforge|forge|fabric|quilt|liteloader|rift|cauldron|bukkit|spigot|paper|purpur|folia|velocity|bungeecord|waterfall|sponge|iris|optifine|canvas|vanilla/g;
+const norm = (v) =>
+  String(v || '')
+    .toLowerCase()
+    .replace(LOADER_WORDS, '')
+    .replace(/^[^a-z0-9]*v(?=\d)/, '')
+    .replace(/[^a-z0-9.]+/g, '');
+
+// strict=true は同じサイト内のファイル同士の比較(完全一致のみ)。別サイト同士は表記ゆれがあるので部分一致も許す。
+export function sameVersion(a, b, strict = false) {
   const x = norm(a.versionNumber);
   const y = norm(b.versionNumber);
   if (!x || !y) return false;
-  return x === y || (x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x)));
+  if (x === y) return true;
+  return !strict && x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x));
 }
 
-export function groupReleases(rels) {
+const VARIANT_WINDOW_MS = 3 * 60 * 60 * 1000;
+
+function canJoin(x, r, o) {
+  if (x.platform !== r.platform) return o.crossPlatform && sameVersion(x, r);
+  if (!o.variants || x.versionId === r.versionId) return false;
+  return sameVersion(x, r, true) && Math.abs(new Date(x.publishedAt) - new Date(r.publishedAt)) <= VARIANT_WINDOW_MS;
+}
+
+export function groupReleases(rels, { crossPlatform = true, variants = true } = {}) {
   const groups = [];
   for (const r of rels) {
-    const g = groups.find((g) => !g.some((x) => x.platform === r.platform) && g.some((x) => sameVersion(x, r)));
+    const g = groups.find((g) => g.some((x) => canJoin(x, r, { crossPlatform, variants })));
     if (g) g.push(r);
     else groups.push([r]);
   }
@@ -41,6 +54,7 @@ export function groupReleases(rels) {
 }
 
 const errText = (e) => String(e?.message || e).slice(0, 200);
+const lc = (a) => (a || []).map((l) => String(l).toLowerCase());
 
 async function markReleases(rels) {
   const by = new Map();
@@ -61,8 +75,9 @@ export async function primeSource(source) {
 export async function processProject(project) {
   const fresh = [];
   const now = () => new Date().toISOString();
+  const polled = project.sources.filter(isPolledSource);
 
-  for (const s of project.sources.filter(isPolledSource)) {
+  for (const s of polled) {
     try {
       const { info, ids, load } = await platforms[s.platform].fetchRecent(s.external_id);
       if (!s.primed) {
@@ -104,19 +119,27 @@ export async function processProject(project) {
   for (const r of fresh) (passesFilters(r, project.filters) ? pass : skip).push(r);
   await markReleases(skip);
 
-  let groups = project.merge_platforms ? groupReleases(pass) : pass.map((r) => [r]);
+  const variants = project.merge_variants !== false;
+  let groups = groupReleases(pass, { crossPlatform: !!project.merge_platforms, variants });
 
-  // まとめ表示: 片方のプラットフォームが遅れて公開されることがあるので、少しだけ待つ
-  if (project.merge_platforms) {
-    const platformCount = new Set(project.sources.filter(isPolledSource).map((s) => s.platform)).size;
-    const waitMs = (project.merge_wait_minutes ?? 15) * 60 * 1000;
-    if (platformCount > 1 && waitMs > 0) {
-      groups = groups.filter((g) => {
-        const complete = new Set(g.map((r) => r.platform)).size >= platformCount;
-        const age = Date.now() - Math.min(...g.map((r) => new Date(r.publishedAt).getTime()));
-        return complete || age >= waitMs;
-      });
-    }
+  // まとめ表示: 他のサイトや別ローダーのファイルが少し遅れて公開されることがあるので、揃うまで少しだけ待つ
+  const waitMs = (project.merge_wait_minutes ?? 15) * 60 * 1000;
+  if (waitMs > 0 && (project.merge_platforms || variants)) {
+    const platformCount = new Set(polled.map((s) => s.platform)).size;
+    groups = groups.filter((g) => {
+      const platformsDone = !project.merge_platforms || platformCount <= 1 || new Set(g.map((r) => r.platform)).size >= platformCount;
+      let loadersDone = true;
+      if (variants) {
+        // 作品が対応しているローダー(絞り込みがあればその中だけ)のファイルが揃ったら待たずに通知する
+        const supported = new Set(g.flatMap((r) => lc(r.info?.loaders)));
+        const wanted = lc(project.filters?.loaders);
+        const expected = wanted.length ? [...supported].filter((l) => wanted.includes(l)) : [...supported];
+        const have = new Set(g.flatMap((r) => lc(r.loaders)));
+        loadersDone = expected.length <= 1 || expected.every((l) => have.has(l));
+      }
+      const age = Date.now() - Math.min(...g.map((r) => new Date(r.publishedAt).getTime()));
+      return (platformsDone && loadersDone) || age >= waitMs;
+    });
   }
 
   // 一度に大量に送らない(最新5件まで)

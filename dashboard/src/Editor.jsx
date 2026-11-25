@@ -42,6 +42,8 @@ const BASE_DISPLAY = {
   show_icon: true,
   show_downloads: true,
   show_links: true,
+  show_project_links: false,
+  project_link_kinds: ['website', 'wiki', 'source', 'issues', 'discord', 'donation'],
 };
 const LOADER_LABEL = { neoforge: 'NeoForge', liteloader: 'LiteLoader', bungeecord: 'BungeeCord', optifine: 'OptiFine' };
 const loaderLabel = (n) => LOADER_LABEL[n] || n.charAt(0).toUpperCase() + n.slice(1);
@@ -57,6 +59,7 @@ function defaultForm(options) {
     color: PRESETS[Math.floor(Math.random() * PRESETS.length)],
     enabled: true,
     merge_platforms: true,
+    merge_variants: true,
     merge_wait_minutes: options?.defaults?.merge_wait_minutes ?? 15,
     mention_everyone: false,
     mention_here: false,
@@ -74,6 +77,7 @@ function projectToForm(p) {
     color: (p.color_hex || '#5865F2').toUpperCase(),
     enabled: p.enabled,
     merge_platforms: p.merge_platforms,
+    merge_variants: p.merge_variants !== false,
     merge_wait_minutes: p.merge_wait_minutes,
     mention_everyone: !!p.mention_everyone,
     mention_here: !!p.mention_here,
@@ -102,6 +106,7 @@ function formToInput(f) {
     color: f.color.toUpperCase(),
     enabled: f.enabled,
     merge_platforms: f.merge_platforms,
+    merge_variants: f.merge_variants,
     merge_wait_minutes: clamp(f.merge_wait_minutes, 0, 120),
     mention_everyone: f.mention_everyone,
     mention_here: f.mention_here,
@@ -467,17 +472,29 @@ function SourcesSection({ form, set, error, saved, gid, pid, onWebhook }) {
 /* ================= まとめ表示 ================= */
 function MergeSection({ form, set }) {
   const platCount = new Set(form.sources.filter(isPolled).map((s) => s.platform)).size;
+  const waiting = form.merge_platforms || form.merge_variants;
   return (
-    <Section id="merge" icon="🧩" title="まとめ表示" desc="ModrinthとCurseForgeの通知を1つのメッセージにまとめます。(GitHubは、通知の方法が「リリースのバージョンを通知」のときだけまとめられます)">
+    <Section id="merge" icon="🧩" title="まとめ表示" desc="同じバージョンの通知を、1つのメッセージにまとめます。">
       <div className="switchrow">
         <div>
           <strong>複数サイトの通知を1つにまとめる</strong>
-          <p className="hint">{platCount > 1 ? '同じバージョンが両方に公開されたら、1つのメッセージで知らせます。' : 'ModrinthとCurseForgeの両方を追加すると効果があります。'}</p>
+          <p className="hint">
+            {platCount > 1
+              ? 'ModrinthとCurseForgeに同じバージョンが公開されたら、1つのメッセージで知らせます。'
+              : 'ModrinthとCurseForgeの両方を追加すると効果があります。(GitHubは、通知の方法が「リリースのバージョンを通知」のときだけまとめられます)'}
+          </p>
         </div>
         <Switch checked={form.merge_platforms} onChange={(v) => set('merge_platforms', v)} label="複数サイトの通知を1つにまとめる" />
       </div>
-      {form.merge_platforms && (
-        <Field label="他のサイトを待つ時間(分)" hint="サイトによって公開のタイミングが違うため、片方だけ先に公開されたとき、この時間だけ待ってから通知します。0なら待ちません。">
+      <div className="switchrow">
+        <div>
+          <strong>別ローダー・別ファイルも1つにまとめる</strong>
+          <p className="hint">FabricとNeoForgeなど、同じバージョンが別々のファイルとして公開されたときも、1つのメッセージにまとめます。</p>
+        </div>
+        <Switch checked={form.merge_variants} onChange={(v) => set('merge_variants', v)} label="別ローダー・別ファイルも1つにまとめる" />
+      </div>
+      {waiting && (
+        <Field label="揃うまで待つ時間(分)" hint="別のサイトや、別ローダーのファイルは、少し遅れて公開されることがあります。そのとき、この時間だけ待ってからまとめて通知します。作品が対応するローダー(絞り込みで選んだ場合はその中)のファイルが全部揃えば、待たずに通知します。0なら待ちません。">
           <input type="number" min={0} max={120} className="short" value={form.merge_wait_minutes} onChange={(e) => set('merge_wait_minutes', e.target.value === '' ? '' : clamp(e.target.value, 0, 120))} />
         </Field>
       )}
@@ -706,6 +723,14 @@ function MentionsSection({ form, set, meta, gid, names, setNames }) {
 }
 
 /* ================= 表示設定 ================= */
+const LINK_KINDS = [
+  ['website', 'Webサイト'],
+  ['wiki', 'Wiki'],
+  ['source', 'ソースコード'],
+  ['issues', '不具合報告'],
+  ['discord', 'Discord'],
+  ['donation', '寄付'],
+];
 const TOGGLES = [
   ['show_changelog', 'チェンジログ(更新内容)'],
   ['show_version_type', 'バージョンタイプ'],
@@ -715,6 +740,7 @@ const TOGGLES = [
   ['show_icon', 'アイコン'],
   ['show_downloads', 'ダウンロード数'],
   ['show_links', 'リンク'],
+  ['show_project_links', '作品の登録リンク(Wiki・ソース等)'],
 ];
 function DisplaySection({ form, setDisplay }) {
   const d = form.display;
@@ -728,6 +754,20 @@ function DisplaySection({ form, setDisplay }) {
           </div>
         ))}
       </div>
+      {d.show_project_links && (
+        <Field label="表示するリンクの種類" hint="作品(ModrinthやCurseForge)に登録されているリンクのうち、選んだものだけを表示します。登録がないものは出ません。">
+          <div className="chips">
+            {LINK_KINDS.map(([k, label]) => {
+              const kinds = d.project_link_kinds || LINK_KINDS.map((x) => x[0]);
+              return (
+                <Chip key={k} selected={kinds.includes(k)} onClick={() => setDisplay('project_link_kinds', kinds.includes(k) ? kinds.filter((x) => x !== k) : [...kinds, k])}>
+                  {label}
+                </Chip>
+              );
+            })}
+          </div>
+        </Field>
+      )}
       <Field label="チェンジログの最大文字数" hint="長い更新内容はここで切り詰めます。0〜3500文字。">
         <div className="row">
           <input type="range" min={0} max={3500} step={50} className="grow" value={d.changelog_max_chars} onChange={(e) => setDisplay('changelog_max_chars', Number(e.target.value))} disabled={!d.show_changelog} />
@@ -745,8 +785,8 @@ function DisplaySection({ form, setDisplay }) {
 const SAMPLE_CHANGELOG =
   '## 変更点\n- 新しい設定画面を追加しました\n- パフォーマンスを改善しました(最大20%高速化)\n- いくつかのクラッシュを修正しました\n\n## 既知の問題\n- 一部のシェーダーで表示が乱れることがあります。次のバージョンで修正予定です。';
 const L = {
-  ja: { vt: 'バージョンタイプ', ld: 'ローダー', gv: '対応バージョン', dl: 'ダウンロード数', dep: '依存関係', req: '必須', ln: 'リンク', ver: 'このバージョン', pr: 'プロジェクト', rel: 'リリース', beta: 'ベータ', alpha: 'アルファ' },
-  en: { vt: 'Version type', ld: 'Loaders', gv: 'Game versions', dl: 'Downloads', dep: 'Dependencies', req: 'Required', ln: 'Links', ver: 'This version', pr: 'Project', rel: 'Release', beta: 'Beta', alpha: 'Alpha' },
+  ja: { vt: 'バージョンタイプ', ld: 'ローダー', gv: '対応バージョン', dl: 'ダウンロード数', dep: '依存関係', req: '必須', ln: 'リンク', pl: '作品のリンク', ver: 'このバージョン', pr: 'プロジェクト', rel: 'リリース', beta: 'ベータ', alpha: 'アルファ' },
+  en: { vt: 'Version type', ld: 'Loaders', gv: 'Game versions', dl: 'Downloads', dep: 'Dependencies', req: 'Required', ln: 'Links', pl: 'Project links', ver: 'This version', pr: 'Project', rel: 'Release', beta: 'Beta', alpha: 'Alpha' },
 };
 const PNAME = { modrinth: 'Modrinth', curseforge: 'CurseForge', github: 'GitHub' };
 
@@ -865,6 +905,14 @@ function Preview({ form, meta, names }) {
                     <b>{t.dep}</b>
                     <span>
                       <b className="inl">{t.req}</b>: <span className="link">Fabric API</span>
+                    </span>
+                  </div>
+                )}
+                {d.show_project_links && (
+                  <div className="ef full">
+                    <b>{t.pl}</b>
+                    <span>
+                      <span className="link">Wiki</span> · <span className="link">{d.language === 'en' ? 'Source' : 'ソースコード'}</span> · <span className="link">Discord</span>
                     </span>
                   </div>
                 )}

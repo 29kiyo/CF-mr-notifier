@@ -80,3 +80,9 @@ export function colorFromString(s) {
   for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return hslToInt(h % 360, 0.65, 0.55);
 }
+
+// ゲームバージョンの指定(例: "1.21.4" / "1.21.*")に一致するか
+export function matchVersion(v, g) {
+  if (g.endsWith('.*')) return v === g.slice(0, -2) || v.startsWith(g.slice(0, -1));
+  return v === g;
+}

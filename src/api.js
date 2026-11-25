@@ -5,9 +5,9 @@ import * as db from './db.js';
 import { platforms, getOptions, PROJECT_TYPES, isPolledSource, ghLatestPayloads } from './platforms.js';
 import { guildMeta, searchMembers, resolveMembers, sendToChannel, explainSendError, botInGuild, inviteUrl } from './bot.js';
 import { requireAuth, requireGuild } from './auth.js';
-import { DEFAULT_DISPLAY, buildMessage } from './embed.js';
+import { DEFAULT_DISPLAY, LINK_KINDS, buildMessage } from './embed.js';
 import { GH_EVENTS, DEFAULT_GH_EVENTS, buildGithubMessage, samplePayload } from './github-events.js';
-import { processProject, primeSource } from './poller.js';
+import { processProject, primeSource, groupReleases, sameVersion } from './poller.js';
 import { colorFromString } from './util.js';
 import { publicUrl } from './config.js';
 
@@ -68,6 +68,7 @@ function cleanInput(b, meta, partial = false) {
   if (has('color')) out.color = parseColor(b.color, out.name || 'project');
   if (has('enabled')) out.enabled = b.enabled !== false;
   if (has('merge_platforms')) out.merge_platforms = b.merge_platforms !== false;
+  if (has('merge_variants')) out.merge_variants = b.merge_variants !== false;
   if (has('merge_wait_minutes')) out.merge_wait_minutes = clamp(parseInt(b.merge_wait_minutes ?? 15, 10) || 0, 0, 120);
   if (has('mention_everyone')) out.mention_everyone = b.mention_everyone === true;
   if (has('mention_here')) out.mention_here = b.mention_here === true;
@@ -87,11 +88,12 @@ function cleanInput(b, meta, partial = false) {
     const d = b.display || {};
     const disp = { language: d.language === 'en' ? 'en' : 'ja' };
     for (const k of Object.keys(DEFAULT_DISPLAY)) {
-      if (k === 'language' || k === 'changelog_max_chars') continue;
+      if (k === 'language' || k === 'changelog_max_chars' || k === 'project_link_kinds') continue;
       disp[k] = d[k] === undefined ? DEFAULT_DISPLAY[k] : !!d[k];
     }
     const mc = parseInt(d.changelog_max_chars ?? DEFAULT_DISPLAY.changelog_max_chars, 10);
     disp.changelog_max_chars = clamp(Number.isNaN(mc) ? DEFAULT_DISPLAY.changelog_max_chars : mc, 0, 3500);
+    disp.project_link_kinds = d.project_link_kinds === undefined ? [...LINK_KINDS] : strArr(d.project_link_kinds, 10, 20).filter((k) => LINK_KINDS.includes(k));
     out.display = disp;
   }
   return out;
@@ -158,6 +160,7 @@ function publicProject(p) {
     enabled: p.enabled,
     merge_platforms: p.merge_platforms,
     merge_wait_minutes: p.merge_wait_minutes,
+    merge_variants: p.merge_variants !== false,
     mention_everyone: !!p.mention_everyone,
     mention_here: !!p.mention_here,
     mention_role_ids: p.mention_role_ids,
@@ -171,24 +174,30 @@ function publicProject(p) {
   };
 }
 
-// 定期チェック型の通知元から、それぞれの最新バージョンを1件ずつ取る
+// 定期チェック型の通知元から、それぞれの最新バージョンを取る(同時に公開された別ローダー・別ファイルも含める)
 async function newestReleases(p) {
-  const newest = [];
+  const out = [];
   for (const s of p.sources.filter(isPolledSource)) {
     try {
       const { candidates, load } = await platforms[s.platform].fetchRecent(s.external_id);
       const rels = await load(candidates);
       rels.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-      if (rels[0]) newest.push(rels[0]);
+      if (!rels[0]) continue;
+      out.push(rels[0]);
+      if (p.merge_variants !== false) {
+        for (const r of rels.slice(1)) {
+          if (sameVersion(rels[0], r, true) && Math.abs(new Date(rels[0].publishedAt) - new Date(r.publishedAt)) <= 3 * 3600e3) out.push(r);
+        }
+      }
     } catch (e) {
       throw bad(`${s.platform} から取得できませんでした: ${e.message}`, 502);
     }
   }
-  return newest;
+  return out;
 }
 
-async function buildPolledMessages(project, newest, opts) {
-  const groups = project.merge_platforms && newest.length ? [newest] : newest.map((r) => [r]);
+async function buildPolledMessages(project, releases, opts) {
+  const groups = groupReleases(releases, { crossPlatform: !!project.merge_platforms, variants: project.merge_variants !== false });
   const out = [];
   for (const g of groups) {
     for (const r of g) await platforms[r.platform].hydrate(r);

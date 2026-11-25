@@ -1,4 +1,6 @@
-import { cleanChangelog, truncate } from './util.js';
+import { cleanChangelog, truncate, matchVersion } from './util.js';
+
+export const LINK_KINDS = ['website', 'wiki', 'source', 'issues', 'discord', 'donation'];
 
 export const DEFAULT_DISPLAY = {
   language: 'ja',
@@ -11,11 +13,14 @@ export const DEFAULT_DISPLAY = {
   show_icon: true,
   show_downloads: true,
   show_links: true,
+  show_project_links: false,
+  project_link_kinds: [...LINK_KINDS],
 };
 
 const PLAT = { modrinth: 'Modrinth', curseforge: 'CurseForge', github: 'GitHub' };
 const PLAT_ORDER = ['modrinth', 'curseforge', 'github'];
 const TYPE_EMOJI = { release: '🟢', beta: '🟡', alpha: '🔴' };
+const LOADER_WORDS = /neoforge|forge|fabric|quilt|liteloader|rift|cauldron|bukkit|spigot|paper|purpur|folia|velocity|bungeecord|waterfall|sponge|iris|optifine|canvas|vanilla/gi;
 
 const LABEL = {
   ja: {
@@ -31,8 +36,10 @@ const LABEL = {
     optional: '任意',
     incompatible: '非互換',
     links: 'リンク',
+    projectLinks: '作品のリンク',
     version: 'このバージョン',
     project: 'プロジェクト',
+    kind: { website: 'Webサイト', wiki: 'Wiki', source: 'ソースコード', issues: '不具合報告', discord: 'Discord' },
     testNote: '🧪 テスト送信です(メンションなし・通知履歴には影響しません)',
     test: 'テスト送信',
     more: '他',
@@ -50,8 +57,10 @@ const LABEL = {
     optional: 'Optional',
     incompatible: 'Incompatible',
     links: 'Links',
+    projectLinks: 'Project links',
     version: 'This version',
     project: 'Project',
+    kind: { website: 'Website', wiki: 'Wiki', source: 'Source', issues: 'Issues', discord: 'Discord' },
     testNote: '🧪 Test message (no mentions, does not affect history)',
     test: 'Test',
     more: 'more',
@@ -60,7 +69,8 @@ const LABEL = {
 
 const nf = new Intl.NumberFormat('en-US');
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-const fmtLoader = (l) => ({ neoforge: 'NeoForge', liteloader: 'LiteLoader' })[l] || cap(l);
+const fmtLoader = (l) => ({ neoforge: 'NeoForge', liteloader: 'LiteLoader', bungeecord: 'BungeeCord', optifine: 'OptiFine' })[l.toLowerCase()] || cap(l);
+const uniq = (a) => [...new Set(a)];
 
 function versionDesc(a, b) {
   const pa = a.split(/[.\-]/).map((x) => parseInt(x, 10) || 0);
@@ -73,25 +83,40 @@ function versionDesc(a, b) {
 }
 
 function compactVersions(list, more, max = 12) {
-  const sorted = [...new Set(list)].sort(versionDesc);
+  const sorted = uniq(list).sort(versionDesc);
   if (sorted.length <= max) return sorted.join(', ');
   return `${sorted.slice(0, max).join(', ')} … +${sorted.length - max}${more}`;
 }
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u).replace(/\s/g, '%20').replace(/\)/g, '%29') : null);
 
-// group = 同じバージョンの各プラットフォームのリリース(1件以上)
+// 別ローダー・別ファイルをまとめたとき、タイトル用にローダー名を取り除いたバージョン表記にする
+function titleVersion(group, main) {
+  const v = main.versionNumber || main.name || '';
+  if (group.length < 2) return v;
+  const cleaned = String(v).replace(LOADER_WORDS, '').replace(/[-_+\s]{2,}/g, '-').replace(/^[-_+\s]+|[-_+\s]+$/g, '');
+  return cleaned || v;
+}
+
+// group = 同じバージョンのリリース(各プラットフォーム・各ローダーのファイル。1件以上)
 export function buildMessage(project, group, { test = false } = {}) {
   const d = { ...DEFAULT_DISPLAY, ...(project.display || {}) };
   const L = LABEL[d.language === 'en' ? 'en' : 'ja'];
   const rels = [...group].sort((a, b) => PLAT_ORDER.indexOf(a.platform) - PLAT_ORDER.indexOf(b.platform));
   const main = rels[0];
 
+  // 絞り込みで選んだローダー・バージョンがあれば、それに関するものだけを表示する
+  const wantLoaders = (project.filters?.loaders || []).map((l) => l.toLowerCase());
+  const wantVersions = project.filters?.game_versions || [];
+  const loadersOf = (r) => (r.loaders || []).filter((l) => !wantLoaders.length || wantLoaders.includes(l.toLowerCase()));
+  const versionsOf = (r) => (r.gameVersions || []).filter((v) => !wantVersions.length || wantVersions.some((g) => matchVersion(v, g)));
+
   const embed = {
-    title: truncate(`${project.name || main.info.name} ${main.versionNumber || main.name}`.trim(), 256),
+    title: truncate(`${project.name || main.info.name} ${titleVersion(rels, main)}`.trim(), 256),
     url: main.url,
     color: Number.isInteger(project.color) ? project.color : 0x5865f2,
-    footer: { text: rels.map((r) => PLAT[r.platform]).join(' + ') + (test ? ` • ${L.test}` : '') },
+    footer: { text: uniq(rels.map((r) => PLAT[r.platform])).join(' + ') + (test ? ` • ${L.test}` : '') },
   };
   const ts = new Date(main.publishedAt);
   if (!Number.isNaN(ts.getTime())) embed.timestamp = ts.toISOString();
@@ -109,7 +134,7 @@ export function buildMessage(project, group, { test = false } = {}) {
 
   const fields = [];
   if (d.show_version_type) {
-    const types = [...new Set(rels.map((r) => r.versionType))];
+    const types = uniq(rels.map((r) => r.versionType));
     fields.push({
       name: L.versionType,
       value: types.map((t) => `${TYPE_EMOJI[t] || '⚪'} ${L[t] || t}`).join(' / '),
@@ -117,15 +142,17 @@ export function buildMessage(project, group, { test = false } = {}) {
     });
   }
   if (d.show_loaders) {
-    const ls = [...new Set(rels.flatMap((r) => r.loaders))];
+    const ls = uniq(rels.flatMap(loadersOf));
     if (ls.length) fields.push({ name: L.loaders, value: truncate(ls.map(fmtLoader).join(', '), 1024), inline: true });
   }
   if (d.show_game_versions) {
-    const gv = rels.flatMap((r) => r.gameVersions);
+    const gv = rels.flatMap(versionsOf);
     if (gv.length) fields.push({ name: L.gameVersions, value: truncate(compactVersions(gv, L.more), 1024), inline: true });
   }
   if (d.show_downloads) {
-    const lines = rels.filter((r) => r.info.downloads != null).map((r) => `${PLAT[r.platform]}: ${nf.format(r.info.downloads)}`);
+    const byPlat = new Map();
+    for (const r of rels) if (r.info.downloads != null && !byPlat.has(r.platform)) byPlat.set(r.platform, r.info.downloads);
+    const lines = [...byPlat].map(([p, n]) => `${PLAT[p]}: ${nf.format(n)}`);
     if (lines.length) fields.push({ name: L.downloads, value: lines.join('\n'), inline: true });
   }
   if (d.show_dependencies) {
@@ -146,8 +173,32 @@ export function buildMessage(project, group, { test = false } = {}) {
     if (lines.length) fields.push({ name: L.deps, value: truncate(lines.join('\n'), 1024) });
   }
   if (d.show_links) {
-    const lines = rels.map((r) => `**${PLAT[r.platform]}** [${L.version}](${r.url}) · [${L.project}](${r.info.url})`);
+    // 同じサイトのファイルが複数あるとき(Fabric版・NeoForge版など)は、ローダー名で見分けられるようにする
+    const perPlat = {};
+    for (const r of rels) perPlat[r.platform] = (perPlat[r.platform] || 0) + 1;
+    const seenProject = new Set();
+    const lines = rels.map((r) => {
+      const tag = perPlat[r.platform] > 1 ? ` (${loadersOf(r).map(fmtLoader).join('/') || r.versionNumber})` : '';
+      const projectLink = seenProject.has(r.platform) ? '' : ` · [${L.project}](${r.info.url})`;
+      seenProject.add(r.platform);
+      return `**${PLAT[r.platform]}**${tag} [${L.version}](${r.url})${projectLink}`;
+    });
     fields.push({ name: L.links, value: truncate(lines.join('\n'), 1024) });
+  }
+  if (d.show_project_links) {
+    const kinds = Array.isArray(d.project_link_kinds) ? d.project_link_kinds : LINK_KINDS;
+    const seen = new Set();
+    const items = [];
+    for (const r of rels) {
+      for (const l of r.info.links || []) {
+        const url = safeUrl(l.url);
+        if (!url || !kinds.includes(l.kind) || seen.has(url)) continue;
+        seen.add(url);
+        items.push({ kind: l.kind, text: l.kind === 'donation' ? `💖 ${l.label}` : L.kind[l.kind] || l.label, url });
+      }
+    }
+    items.sort((a, b) => LINK_KINDS.indexOf(a.kind) - LINK_KINDS.indexOf(b.kind));
+    if (items.length) fields.push({ name: L.projectLinks, value: truncate(items.map((i) => `[${i.text}](${i.url})`).join(' · '), 1024) });
   }
   if (fields.length) embed.fields = fields;
 

@@ -14,6 +14,16 @@ const LOADER_RE = /^(fabric|forge|neoforge|quilt|liteloader|rift|cauldron)$/i;
 /* ------------------------------------------------------------------ */
 /* Modrinth                                                            */
 /* ------------------------------------------------------------------ */
+function mrLinks(p) {
+  const out = [];
+  if (p.wiki_url) out.push({ kind: 'wiki', label: 'Wiki', url: p.wiki_url });
+  if (p.source_url) out.push({ kind: 'source', label: 'Source', url: p.source_url });
+  if (p.issues_url) out.push({ kind: 'issues', label: 'Issues', url: p.issues_url });
+  if (p.discord_url) out.push({ kind: 'discord', label: 'Discord', url: p.discord_url });
+  for (const d of p.donation_urls || []) if (d.url) out.push({ kind: 'donation', label: d.platform || 'Donate', url: d.url });
+  return out;
+}
+
 function mrInfo(p) {
   return {
     platform: 'modrinth',
@@ -25,6 +35,8 @@ function mrInfo(p) {
     downloads: p.downloads ?? null,
     projectType: p.project_type,
     url: `https://modrinth.com/project/${p.slug}`,
+    loaders: p.loaders || [],
+    links: mrLinks(p),
   };
 }
 
@@ -126,6 +138,17 @@ function cfHeaders() {
 }
 const cf = (path, opts = {}) => http(`${CF}${path}`, { ...opts, headers: cfHeaders() });
 
+const CF_LOADER = { 1: 'forge', 2: 'cauldron', 3: 'liteloader', 4: 'fabric', 5: 'quilt', 6: 'neoforge' };
+const cfLoaders = (m) => [...new Set((m.latestFilesIndexes || []).map((i) => CF_LOADER[i.modLoader]).filter(Boolean))];
+function cfLinks(m) {
+  const l = m.links || {};
+  const out = [];
+  if (l.wikiUrl) out.push({ kind: 'wiki', label: 'Wiki', url: l.wikiUrl });
+  if (l.sourceUrl) out.push({ kind: 'source', label: 'Source', url: l.sourceUrl });
+  if (l.issuesUrl) out.push({ kind: 'issues', label: 'Issues', url: l.issuesUrl });
+  return out;
+}
+
 function cfInfo(m) {
   return {
     platform: 'curseforge',
@@ -137,6 +160,8 @@ function cfInfo(m) {
     downloads: m.downloadCount ?? null,
     projectType: CF_CLASS_REV[m.classId] || 'mod',
     url: m.links?.websiteUrl || `https://www.curseforge.com/minecraft/mc-mods/${m.slug}`,
+    loaders: cfLoaders(m),
+    links: cfLinks(m),
   };
 }
 
