@@ -228,6 +228,17 @@ async function deliver(project, messages) {
   }
 }
 
+// 古いバージョンで作った GitHub の通知元には Webhook の Secret がないことがあるので、見つからなければここで作って保存する
+async function presentProject(p) {
+  for (const s of p.sources || []) {
+    if (s.platform === 'github' && !s.config?.webhook_secret) {
+      s.config = { ...(s.config || {}), webhook_secret: crypto.randomBytes(24).toString('hex') };
+      await db.updateSource(s.id, { config: s.config });
+    }
+  }
+  return publicProject(p);
+}
+
 export const apiRouter = express.Router();
 apiRouter.use(express.json({ limit: '100kb' }));
 apiRouter.use(requireAuth);
@@ -342,7 +353,7 @@ guild.get(
 
 guild.get(
   '/projects',
-  wrap(async (req, res) => res.json({ projects: (await db.listProjects(req.params.gid)).map(publicProject) })),
+  wrap(async (req, res) => res.json({ projects: await Promise.all((await db.listProjects(req.params.gid)).map(presentProject)) })),
 );
 
 guild.post(
@@ -366,7 +377,7 @@ guild.post(
       const row = await db.addSource({ project_id: p.id, ...r, primed: !polled });
       if (polled) await primeSource(row).catch(() => {});
     }
-    res.json({ project: publicProject(await db.getProject(p.id)) });
+    res.json({ project: await presentProject(await db.getProject(p.id)) });
   }),
 );
 
@@ -410,7 +421,7 @@ guild.put(
       for (const s of p.sources) if (!keep.has(s.id)) await db.deleteSource(s.id);
     }
     if (Object.keys(input).length) await db.updateProject(p.id, input);
-    res.json({ project: publicProject(await db.getProject(p.id)) });
+    res.json({ project: await presentProject(await db.getProject(p.id)) });
   }),
 );
 
